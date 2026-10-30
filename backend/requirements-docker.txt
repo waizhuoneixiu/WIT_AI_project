@@ -9,3 +9,4 @@ python-multipart>=0.0.32
 pydantic>=2.14
 requests>=2.34
 python-dotenv>=1.2
+openai>=3.41

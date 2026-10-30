@@ -24,6 +24,8 @@ from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile,
 from pydantic import BaseModel
 
 import contract
+import llm
+import llm_prompts
 import runtime
 import storage
 from config import CLASSES_CN
@@ -143,8 +145,8 @@ def _inspection_detail(row, det_rows):
     }
 
 
-def _analysis_for(detections):
-    """首版规则模板：事实/引用/参考原因/复检步骤/待补信息分离输出。"""
+def _rule_analysis(detections):
+    """规则模板兜底：事实/引用/参考原因/复检步骤/待补信息分离输出。"""
     if not detections:
         return {
             'facts': ['本图未检出六类目标缺陷；不等同于产品合格判定。'],
@@ -176,7 +178,40 @@ def _analysis_for(detections):
     }
 
 
-def _answer_question(context_type, context_id, question):
+def _analysis_for(detections, inspection_id=None, review_status=None):
+    """优先调用 DeepSeek 大模型；未配置/失败时降级规则模板，并标注来源。"""
+    rule = _rule_analysis(detections)
+    if not llm.available():
+        rule['source'] = 'rule_fallback'
+        rule['reason'] = '未配置 DEEPSEEK_API_KEY（离线规则模板）'
+        return rule
+    try:
+        result = llm.chat_json(
+            llm_prompts.ANALYSIS_SYSTEM,
+            llm_prompts.build_analysis_user_prompt(detections, inspection_id, review_status),
+        )
+        data = result.get('data', {})
+        out = {}
+        for key in ('facts', 'references', 'hypotheses', 'recheck_steps', 'missing_information'):
+            val = data.get(key, rule[key])
+            if isinstance(val, str):
+                val = [val]
+            if not isinstance(val, list):
+                val = rule[key]
+            out[key] = [str(x).strip() for x in val if str(x).strip()][:12]
+        out['source'] = 'deepseek'
+        out['model'] = result.get('model')
+        out['latency_ms'] = result.get('latency_ms')
+        out['tokens'] = result.get('tokens')
+        return out
+    except Exception as e:  # noqa: BLE001
+        rule['source'] = 'rule_fallback'
+        rule['reason'] = '大模型调用失败，已降级：%s' % str(e)[:180]
+        return rule
+
+
+def _rule_answer(context_type, context_id, question):
+    """规则模板兜底回答（无大模型/失败时使用）。"""
     q = (question or '').strip()
     if context_type == 'batch':
         summary = storage.batch_summary(context_id)
@@ -191,7 +226,7 @@ def _answer_question(context_type, context_id, question):
         return '未找到检测记录：%s' % context_id, []
     det_json = [{'class_name': d['class_name'], 'class_cn': CLASSES_CN.get(d['class_name'], d['class_name']),
                  'confidence': d['score'], 'bbox_xyxy': json.loads(d['bbox_json'])} for d in dets]
-    analysis = _analysis_for(det_json)
+    analysis = _rule_analysis(det_json)
     if any(k in q for k in ('原因', '为什么', '怎么造成')):
         return '、'.join(analysis['hypotheses']) or '暂无足够依据判断原因，建议补充工艺与图像信息。', analysis['references']
     if any(k in q for k in ('怎么办', '处理', '复检', '建议')):
@@ -203,9 +238,66 @@ def _answer_question(context_type, context_id, question):
         '；'.join(analysis['facts'][:2])), analysis['references'])
 
 
+def _build_chat_context(context_type, context_id):
+    """为聊天组装上下文（检测记录或批次统计）。"""
+    if context_type == 'batch':
+        summary = storage.batch_summary(context_id)
+        return summary, None
+    row, dets = storage.get_inspection(context_id)
+    if not row:
+        return None, None
+    detail = _inspection_detail(row, dets)
+    return detail, row
+
+
+def _answer_question(context_type, context_id, question):
+    """优先 DeepSeek 大模型回答；失败/未配置降级规则模板。返回 (answer, references, source)。"""
+    rule_answer, rule_refs = _rule_answer(context_type, context_id, question)
+    if not llm.available():
+        return rule_answer, rule_refs, 'rule_fallback'
+    context, _ = _build_chat_context(context_type, context_id)
+    if context is None:
+        return rule_answer, rule_refs, 'rule_fallback'
+    try:
+        # 上下文裁剪，避免超长
+        if context_type == 'inspection':
+            ctx = {
+                'inspection_id': context.get('inspection_id'),
+                'batch_no': context.get('batch_no'),
+                'image_width': context.get('image_width'),
+                'image_height': context.get('image_height'),
+                'model_version': context.get('model_version'),
+                'review_status': context.get('review_status'),
+                'detections': context.get('detections', [])[:30],
+            }
+        else:
+            ctx = context
+        result = llm.chat_json(llm_prompts.CHAT_SYSTEM,
+                               llm_prompts.build_chat_user_prompt(context_type, ctx, question),
+                               max_tokens=900)
+        data = result.get('data', {})
+        answer = data.get('answer') or rule_answer
+        refs = data.get('references') or rule_refs
+        if isinstance(refs, str):
+            refs = [refs]
+        if not isinstance(refs, list):
+            refs = rule_refs
+        return str(answer), [str(x) for x in refs][:10], 'deepseek'
+    except Exception:  # noqa: BLE001
+        return rule_answer, rule_refs, 'rule_fallback'
+
+
 # ---------------------------------------------------------------------------
 # 接口
 # ---------------------------------------------------------------------------
+@router.get('/llm/info')
+def llm_info():
+    """大模型配置状态（不返回 Key）。"""
+    info = llm.info()
+    info['available'] = llm.available()
+    return info
+
+
 @router.get('/class-map')
 def class_map():
     """原始训练类别 -> 契约类别映射（App/报告按契约 class_id）。"""
@@ -312,7 +404,7 @@ def create_analysis(inspection_id: str, req: AnalysisRequest | None = None):
         raise HTTPException(status_code=404, detail='inspection 不存在')
     det_json = [{'class_name': d['class_name'], 'class_cn': CLASSES_CN.get(d['class_name'], d['class_name']),
                  'confidence': d['score'], 'bbox_xyxy': json.loads(d['bbox_json'])} for d in dets]
-    analysis = _analysis_for(det_json)
+    analysis = _analysis_for(det_json, inspection_id, row['review_status'])
     task_id = storage.new_id('TASK')
     storage.add_analysis(inspection_id, analysis)
     storage.insert_task(task_id, 'analysis', 'completed', inspection_id,
@@ -330,12 +422,13 @@ class ChatRequest(BaseModel):
 def chat(req: ChatRequest):
     if req.context_type not in ('inspection', 'batch'):
         raise HTTPException(status_code=422, detail='context_type 仅支持 inspection/batch')
-    answer, references = _answer_question(req.context_type, req.context_id, req.question)
+    answer, references, source = _answer_question(req.context_type, req.context_id, req.question)
     task_id = storage.new_id('TASK')
     storage.add_chat(req.context_type, req.context_id, req.question, answer)
     storage.insert_task(task_id, 'chat', 'completed', req.context_id if req.context_type == 'inspection' else None,
-                        {'answer': answer, 'references': references})
-    return {'task_id': task_id, 'status': 'completed', 'answer': answer, 'references': references}
+                        {'answer': answer, 'references': references, 'source': source})
+    return {'task_id': task_id, 'status': 'completed', 'answer': answer,
+            'references': references, 'source': source}
 
 
 class ReviewRequest(BaseModel):

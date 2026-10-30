@@ -2,7 +2,7 @@
 
 | 文档信息 | 内容 |
 | --- | --- |
-| 版本 | v1.1.0 |
+| 版本 | v1.3.0 |
 | 生成日期 | 2026-10-30 |
 | 服务 | SteelScan 热轧带钢表面缺陷检测 API |
 | 模型 | **YOLO26n @ imgsz=640**（ultralytics **8.4.193**，PyTorch 2.14.1+cu130） |
@@ -41,6 +41,22 @@ X-API-Key: <你设置的 Key>
 - 未带或错误 Key → `401 {"detail": "无效或缺失 API Key（请求头 X-API-Key）"}`
 - 可通过 `GET /health` 的 `auth_required` 字段判断服务端是否开启鉴权。
 - 设置方式：`$env:STEELSCAN_API_KEY="your-key"`（PowerShell）/ `export STEELSCAN_API_KEY=...`（Linux）/ Docker 环境变量。
+
+## 1.2 大模型配置（DeepSeek，用于分析/追问）
+
+服务端配置以下环境变量后，`/api/inspections/{id}/analysis` 与 `/api/chat/messages` 会自动调用 **DeepSeek** 生成分析/回答：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key；留空则使用离线规则模板 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容接口地址 |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
+| `LLM_PROVIDER` | `deepseek` | 设为其它值可强制关闭 |
+| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 40 / 2 | 超时秒数 / 重试次数 |
+
+- 返回结果中的 `source` 字段标识来源：`deepseek`=真实大模型，`rule_fallback`=离线规则模板（未配置/超时/失败自动降级，附带 `reason`）。
+- `GET /api/llm/info` 可查看当前是否已配置（不返回 Key）。
+- 大模型只做**辅助解释与建议**，不替代检测、不编造原因；最终判定需人工复核。
 
 ---
 
@@ -284,6 +300,7 @@ curl -X POST http://127.0.0.1:8000/detect/batch \
 ## 4.10 团队共同接口 `/api`（按 docs/plans/04-shared-contract.md 实现）
 
 App 主流程使用这组接口；`/detect` 仅用于快速联调。所有 `/api` 接口在开启鉴权时同样需要 `X-API-Key`。
+`analysis` / `chat` 接口返回中的 `source` 标识分析来源（`deepseek` 或 `rule_fallback`），未配置 DeepSeek Key 时自动降级。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -298,6 +315,7 @@ App 主流程使用这组接口；`/detect` 仅用于快速联调。所有 `/api
 | GET | `/api/reports/{report_id 或 inspection_id}` | 报告（Markdown） |
 | WS | `/ws/tasks/{task_id}` | 任务事件（accepted/completed） |
 | GET | `/api/class-map` | 原始训练类别 → 契约类别映射 |
+| GET | `/api/llm/info` | 大模型配置状态（provider/model/是否已配置，不返回 Key） |
 
 **POST /api/inspections 示例**
 
@@ -387,6 +405,7 @@ curl -X POST http://127.0.0.1:8000/api/inspections \
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.3.0 | 2026-10-30 | 接入 DeepSeek 大模型（analysis/chat 返回 source=deepseek/rule_fallback，失败自动降级）；新增 `/api/llm/info` |
 | v1.2.0 | 2026-10-30 | 新增团队共同接口 `/api`（inspections/tasks/review/summary/reports/chat/analysis/WS/class-map）、SQLite 持久化；类别按 04-shared-contract 统一映射 |
 | v1.1.0 | 2026-10-30 | 新增 API Key 鉴权（`X-API-Key`，`STEELSCAN_API_KEY` 开启）；`/health` 增加 `auth_required` |
 | v1.0.0 | 2026-10-30 | 首个后端版本；YOLO26n@640；6 个接口；GPU 11.6ms / CPU 23.9ms |

@@ -6,6 +6,46 @@
     "description": "SteelScan 热轧带钢表面缺陷检测后端 API（YOLO26n @640）"
   },
   "paths": {
+    "/api/llm/info": {
+      "get": {
+        "summary": "Llm Info",
+        "description": "大模型配置状态（不返回 Key）。",
+        "operationId": "llm_info_api_llm_info_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "API Key（服务端设置 STEELSCAN_API_KEY 后必填）",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key（服务端设置 STEELSCAN_API_KEY 后必填）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/class-map": {
       "get": {
         "summary": "Class Map",

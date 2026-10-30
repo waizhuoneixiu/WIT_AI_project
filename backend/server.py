@@ -42,6 +42,7 @@ from pydantic import BaseModel  # noqa: E402
 
 import api_v1  # noqa: E402
 import contract  # noqa: E402
+import llm  # noqa: E402
 import runtime  # noqa: E402
 import storage  # noqa: E402
 from security import verify_api_key  # noqa: E402
@@ -90,6 +91,7 @@ def health():
         'model_loaded': runtime._detector is not None,
         'auth_required': bool(config.API_KEY),
         'storage': storage.DB_PATH,
+        'llm': llm.info(),
         'contract_classes': contract.classes(),
     }
 
