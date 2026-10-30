@@ -1,0 +1,42 @@
+{
+  "inspection_id": "INSP-20261030173736-6DC741",
+  "batch_no": "SAMPLE-BATCH-001",
+  "workpiece_no": "SAMPLE-W1",
+  "image_width": 200,
+  "image_height": 200,
+  "model_version": "best.pt",
+  "detections": [
+    {
+      "detection_id": "DET-20261030173742-C51CE9",
+      "class_id": 2,
+      "class_name": "patches",
+      "score": 0.8832,
+      "bbox_xyxy": [
+        62.23,
+        68.4,
+        136.18,
+        160.79
+      ]
+    },
+    {
+      "detection_id": "DET-20261030173742-864BDA",
+      "class_id": 2,
+      "class_name": "patches",
+      "score": 0.8072,
+      "bbox_xyxy": [
+        7.98,
+        95.96,
+        45.08,
+        133.11
+      ]
+    }
+  ],
+  "timing": {
+    "inference_ms": 41.7,
+    "total_ms": 5640.22
+  },
+  "review_status": "pending",
+  "review": null,
+  "annotated_url": "/files/INSP-20261030173736-6DC741_pred.jpg",
+  "created_at": "2026-10-30T17:37:42"
+}

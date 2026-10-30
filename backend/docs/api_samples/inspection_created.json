@@ -1,0 +1,13 @@
+{
+  "inspection_id": "INSP-20261030173736-6DC741",
+  "task_id": "TASK-20261030173736-60D196",
+  "status": "completed",
+  "detection_count": 2,
+  "image_width": 200,
+  "image_height": 200,
+  "model_version": "best.pt",
+  "timing": {
+    "inference_ms": 41.7,
+    "total_ms": 5640.22
+  }
+}

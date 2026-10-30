@@ -150,6 +150,13 @@ backend/
 └─ deploy/                # 本地启动脚本 + 魔搭创空间 Gradio 部署包
 ```
 
+## 5.1 可直接发队友的交付包
+
+- [deliverables/给队员二_App联调包.zip](deliverables/给队员二_App联调包.zip)：接口文档、速查卡、真实响应样例、30 秒自测脚本、现成消息文案
+- [deliverables/给队员三_材料包.zip](deliverables/给队员三_材料包.zip)：指标速查、模型卡、训练/验收记录、图表、接口样例、消息文案
+- [deliverables/发送说明.txt](deliverables/发送说明.txt)：哪个包发谁、发送步骤与安全提醒
+- 真实接口响应样例：[docs/api_samples/](docs/api_samples/)（13 个 JSON，可直接给 App mock）
+
 ## 6. 部署
 
 - **本地工位**：`python server.py --port 8000` 或 `.\deploy\run_server.ps1`（断外网仍可检测）。

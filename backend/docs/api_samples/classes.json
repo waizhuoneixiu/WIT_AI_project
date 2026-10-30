@@ -1,0 +1,34 @@
+{
+  "classes": [
+    {
+      "id": 0,
+      "name": "crazing",
+      "name_cn": "龟裂 / 网状裂纹"
+    },
+    {
+      "id": 1,
+      "name": "inclusion",
+      "name_cn": "夹杂"
+    },
+    {
+      "id": 2,
+      "name": "patches",
+      "name_cn": "斑块"
+    },
+    {
+      "id": 3,
+      "name": "pitted_surface",
+      "name_cn": "麻点表面"
+    },
+    {
+      "id": 4,
+      "name": "rolled-in_scale",
+      "name_cn": "轧入氧化皮"
+    },
+    {
+      "id": 5,
+      "name": "scratches",
+      "name_cn": "划痕"
+    }
+  ]
+}

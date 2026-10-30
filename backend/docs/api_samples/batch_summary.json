@@ -1,0 +1,13 @@
+{
+  "batch_no": "SAMPLE-BATCH-001",
+  "image_count": 1,
+  "model_box_count": 2,
+  "per_class": {
+    "patches": 2
+  },
+  "review_stats": {
+    "confirmed": 1
+  },
+  "confirmed_count": 1,
+  "unresolved_count": 0
+}

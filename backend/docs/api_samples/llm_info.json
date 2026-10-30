@@ -1,0 +1,13 @@
+{
+  "provider": "deepseek",
+  "mode": "deepseek-api",
+  "model": "deepseek-chat",
+  "configured": true,
+  "source": "deepseek",
+  "deepseek_configured": true,
+  "local_model_path": "D:\\Users\\何ch\\source\\repos  AI\\AIvision1\\models\\DeepSeek-R1-Distill-Qwen-1.5B",
+  "local_model_ready": true,
+  "base_url": "https://api.deepseek.com",
+  "timeout_s": 40.0,
+  "available": true
+}

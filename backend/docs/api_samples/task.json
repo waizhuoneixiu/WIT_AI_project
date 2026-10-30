@@ -1,0 +1,46 @@
+{
+  "task_id": "TASK-20261030173736-60D196",
+  "type": "detection",
+  "status": "completed",
+  "inspection_id": "INSP-20261030173736-6DC741",
+  "created_at": "2026-10-30T17:37:42",
+  "updated_at": "2026-10-30T17:37:42",
+  "error": null,
+  "result": {
+    "inspection_id": "INSP-20261030173736-6DC741",
+    "detections": [
+      {
+        "detection_id": "DET-20261030173742-C51CE9",
+        "class_id": 2,
+        "class_name": "patches",
+        "class_cn": "斑块",
+        "score": 0.8832,
+        "bbox_xyxy": [
+          62.23,
+          68.4,
+          136.18,
+          160.79
+        ],
+        "area_ratio": 0.1708
+      },
+      {
+        "detection_id": "DET-20261030173742-864BDA",
+        "class_id": 2,
+        "class_name": "patches",
+        "class_cn": "斑块",
+        "score": 0.8072,
+        "bbox_xyxy": [
+          7.98,
+          95.96,
+          45.08,
+          133.11
+        ],
+        "area_ratio": 0.0345
+      }
+    ],
+    "timing": {
+      "inference_ms": 41.7,
+      "total_ms": 5640.22
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "total": 1,
+  "page": 1,
+  "page_size": 20,
+  "items": [
+    {
+      "inspection_id": "INSP-20261030173736-6DC741",
+      "batch_no": "SAMPLE-BATCH-001",
+      "workpiece_no": "SAMPLE-W1",
+      "image_width": 200,
+      "image_height": 200,
+      "model_version": "best.pt",
+      "review_status": "pending",
+      "created_at": "2026-10-30T17:37:42",
+      "annotated_url": "/files/INSP-20261030173736-6DC741_pred.jpg",
+      "detection_count": 2,
+      "classes": [
+        "patches"
+      ]
+    }
+  ]
+}

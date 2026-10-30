@@ -1,0 +1,86 @@
+{
+  "contract_classes": [
+    {
+      "class_id": 0,
+      "class_name": "crazing",
+      "class_cn": "龟裂 / 网状裂纹"
+    },
+    {
+      "class_id": 1,
+      "class_name": "inclusion",
+      "class_cn": "夹杂"
+    },
+    {
+      "class_id": 2,
+      "class_name": "patches",
+      "class_cn": "斑块"
+    },
+    {
+      "class_id": 3,
+      "class_name": "pitted_surface",
+      "class_cn": "麻点表面"
+    },
+    {
+      "class_id": 4,
+      "class_name": "rolled-in_scale",
+      "class_cn": "轧入氧化皮"
+    },
+    {
+      "class_id": 5,
+      "class_name": "scratches",
+      "class_cn": "划痕"
+    }
+  ],
+  "raw_model_classes": [
+    "rolled-in_scale",
+    "patches",
+    "crazing",
+    "pitted_surface",
+    "inclusion",
+    "scratches"
+  ],
+  "mapping": [
+    {
+      "raw_index": 0,
+      "raw_name": "rolled-in_scale",
+      "class_id": 4,
+      "class_name": "rolled-in_scale",
+      "class_cn": "轧入氧化皮"
+    },
+    {
+      "raw_index": 1,
+      "raw_name": "patches",
+      "class_id": 2,
+      "class_name": "patches",
+      "class_cn": "斑块"
+    },
+    {
+      "raw_index": 2,
+      "raw_name": "crazing",
+      "class_id": 0,
+      "class_name": "crazing",
+      "class_cn": "龟裂 / 网状裂纹"
+    },
+    {
+      "raw_index": 3,
+      "raw_name": "pitted_surface",
+      "class_id": 3,
+      "class_name": "pitted_surface",
+      "class_cn": "麻点表面"
+    },
+    {
+      "raw_index": 4,
+      "raw_name": "inclusion",
+      "class_id": 1,
+      "class_name": "inclusion",
+      "class_cn": "夹杂"
+    },
+    {
+      "raw_index": 5,
+      "raw_name": "scratches",
+      "class_id": 5,
+      "class_name": "scratches",
+      "class_cn": "划痕"
+    }
+  ]
+}
