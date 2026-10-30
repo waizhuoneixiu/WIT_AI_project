@@ -186,10 +186,21 @@ def _analysis_for(detections, inspection_id=None, review_status=None):
         rule['reason'] = '未配置 DEEPSEEK_API_KEY（离线规则模板）'
         return rule
     try:
-        result = llm.chat_json(
-            llm_prompts.ANALYSIS_SYSTEM,
-            llm_prompts.build_analysis_user_prompt(detections, inspection_id, review_status),
-        )
+        try:
+            result = llm.chat_json(
+                llm_prompts.ANALYSIS_SYSTEM,
+                llm_prompts.build_analysis_user_prompt(detections, inspection_id, review_status),
+            )
+        except Exception:
+            # 本地小模型在处理长提示词时可能输出截断的思考文本：用精简提示词重试一次
+            if llm.source_name() == 'local-deepseek':
+                result = llm.chat_json(
+                    llm_prompts.LOCAL_ANALYSIS_SYSTEM,
+                    llm_prompts.build_analysis_compact_prompt(detections, inspection_id),
+                    max_tokens=1200,
+                )
+            else:
+                raise
         data = result.get('data', {})
         out = {}
         for key in ('facts', 'references', 'hypotheses', 'recheck_steps', 'missing_information'):
@@ -199,7 +210,7 @@ def _analysis_for(detections, inspection_id=None, review_status=None):
             if not isinstance(val, list):
                 val = rule[key]
             out[key] = [str(x).strip() for x in val if str(x).strip()][:12]
-        out['source'] = 'deepseek'
+        out['source'] = llm.source_name()
         out['model'] = result.get('model')
         out['latency_ms'] = result.get('latency_ms')
         out['tokens'] = result.get('tokens')
@@ -282,7 +293,7 @@ def _answer_question(context_type, context_id, question):
             refs = [refs]
         if not isinstance(refs, list):
             refs = rule_refs
-        return str(answer), [str(x) for x in refs][:10], 'deepseek'
+        return str(answer), [str(x) for x in refs][:10], llm.source_name()
     except Exception:  # noqa: BLE001
         return rule_answer, rule_refs, 'rule_fallback'
 

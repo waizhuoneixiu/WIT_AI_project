@@ -237,11 +237,11 @@ report = requests.get(f"{BASE}/api/reports/{created['inspection_id']}", headers=
 
 ---
 
-## 10. 大模型分析与追问（DeepSeek）
+## 10. 大模型分析与追问（DeepSeek / 本地模型）
 
-- 服务端配置 `DEEPSEEK_API_KEY` 后，`analysis` 和 `chat` 会自动调用 DeepSeek；未配置/断网时自动降级规则模板。
-- 返回结果带 `source` 字段：`deepseek` 表示真实大模型，`rule_fallback` 表示离线模板（会有 `reason`）。前端可据此提示用户。
-- 查看服务端是否已开启：`GET /api/llm/info`（不返回 Key）。
+- 服务端可配置 **DeepSeek 云 API**（`DEEPSEEK_API_KEY`）或 **本地 DeepSeek-R1 蒸馏模型**（无需 Key）；`analysis` 和 `chat` 自动调用，失败/断网自动降级规则模板。
+- 返回结果带 `source` 字段：`deepseek`=云 API，`local-deepseek`=本地大模型，`rule_fallback`=离线模板（会有 `reason`）。前端可据此提示用户。
+- 查看服务端当前状态：`GET /api/llm/info`（不返回 Key）。
 - 可把 `analysis` 的 `facts/references/hypotheses/recheck_steps/missing_information` 直接展示给用户；
   `chat` 返回 `answer` 与 `references`。
 - 大模型内容是**辅助建议**，不能替代人工复核；演示/报告中注意标注。

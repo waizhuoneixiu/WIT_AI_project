@@ -54,6 +54,7 @@ FAKE_OK = {
 def main():
     orig_available = llm.available
     orig_chat = llm.chat_json
+    orig_source = llm.source_name
 
     print('== 1) 未配置 Key -> 规则降级 ==')
     api_v1.llm.available = lambda: False
@@ -64,6 +65,7 @@ def main():
 
     print('\n== 2) 大模型成功 -> source=deepseek ==')
     api_v1.llm.available = lambda: True
+    api_v1.llm.source_name = lambda: 'deepseek'
     api_v1.llm.chat_json = lambda *a, **k: dict(FAKE_OK)
     out = api_v1._analysis_for(DET, 'INSP-TEST', 'pending')
     check(out.get('source') == 'deepseek', 'analysis source=deepseek')
@@ -107,11 +109,20 @@ def main():
             print('  模型:', res.get('model'), '| 时延:', res.get('latency_ms'), 'ms')
         except Exception as e:  # noqa: BLE001
             check(False, '真实调用失败: %r' % e)
+    elif llm.provider() == 'local':
+        print('\n== 5) 真实本地大模型调用（无需 Key） ==')
+        try:
+            res = llm.chat_json('你是助手，只输出 JSON。', '请输出 JSON：{"ok": true, "msg": "hello"}', max_tokens=60)
+            check(isinstance(res.get('data'), dict), '本地真实调用返回 JSON')
+            print('  模型:', res.get('model'), '| 设备:', res.get('device'), '| 时延:', res.get('latency_ms'), 'ms')
+        except Exception as e:  # noqa: BLE001
+            check(False, '本地真实调用失败: %r' % e)
     else:
-        print('\n== 5) 真实 DeepSeek 调用：跳过（未配置 DEEPSEEK_API_KEY） ==')
+        print('\n== 5) 真实大模型调用：跳过（未配置 Key，且本地模型未就绪） ==')
 
     api_v1.llm.available = orig_available
     api_v1.llm.chat_json = orig_chat
+    api_v1.llm.source_name = orig_source
 
     print('\n== 结论 ==')
     if failures:

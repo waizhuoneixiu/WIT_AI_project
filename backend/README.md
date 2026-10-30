@@ -14,12 +14,12 @@
 | B-04 合成接口与任务框架 | ✅ | 见下文 API 与 `docs/openapi.json`；任务状态 queued/running/completed/failed |
 | B-05 真实检测 API | ✅ | `POST /api/inspections` 上传+检测+落库，原图像素坐标框、模型版本、任务查询 |
 | B-06 记录与人工复核 | ✅（首版） | SQLite 保存记录/复核；复核 `base_version` 版本校验（409），原预测不被覆盖 |
-| B-07 知识与大模型 | ✅ 已接入 DeepSeek（可降级） | analysis/chat 调用 DeepSeek（OpenAI 兼容）；无 Key/超时/失败自动降级规则模板，返回 `source` 字段；字段 facts/references/hypotheses/recheck_steps/missing_information |
+| B-07 知识与大模型 | ✅ 已接入 DeepSeek（云端 + 本地，可降级） | analysis/chat 支持 DeepSeek 云 API 或本地 DeepSeek-R1 蒸馏模型（transformers，无需 Key），失败/无配置自动降级规则模板；返回 `source` 字段；字段 facts/references/hypotheses/recheck_steps/missing_information |
 | B-08 WebSocket | ⏳ 首版 | `/ws/tasks/{task_id}` 推送 accepted/completed；断线恢复走 `GET /api/tasks/{id}` |
 | B-09 批次统计与报告 | ✅（首版） | `/api/batches/{no}/summary` 真实统计；`/api/reports/{id}` Markdown 报告 |
 | B-10 部署与服务配置 | ✅ | 本地脚本 / Docker / 魔搭 Gradio 演示包（见 `deploy/`） |
 | B-11 模型与流程评价 | ✅ | 测试集指标、时延、阈值、失败样例见 `docs/训练实验记录.md` |
-| B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（41 项全过） |
+| B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（规则降级 41 项 / 本地大模型 40 项全部通过） |
 
 ## 2. 快速开始
 
@@ -114,18 +114,24 @@ curl -X POST http://127.0.0.1:8000/api/inspections \
 
 验收记录：**[docs/验收记录.md](docs/验收记录.md)**（2026-10-30，真实 HTTP 41 项检查全部通过；真实 DeepSeek 调用待配置 Key 后补测）。
 
-### 4.3 大模型（DeepSeek）
+### 4.3 大模型（DeepSeek 云 API / 本地模型）
 
-`/api/inspections/{id}/analysis` 与 `/api/chat/messages` 已接入 **DeepSeek**（OpenAI 兼容接口），用于复检建议、原因参考、报告与追问：
+`/api/inspections/{id}/analysis` 与 `/api/chat/messages` 支持两种大模型来源（`LLM_PROVIDER` 控制）：
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "sk-..."       # 留空则自动使用离线规则模板
-$env:DEEPSEEK_MODEL = "deepseek-chat"  # 默认
+# 方式 A：DeepSeek 云 API（有 Key 时）
+$env:DEEPSEEK_API_KEY = "sk-..."
+$env:LLM_PROVIDER = "auto"        # 默认：有 Key 用云 API，否则本地模型，否则规则模板
+
+# 方式 B：本地大模型（无需 Key / 断网可用）
+python scripts/download_local_llm.py    # 下载 DeepSeek-R1-Distill-Qwen-1.5B（约 3.5GB）
+$env:LLM_PROVIDER = "local"
 python server.py --port 8000
 ```
 
-- 返回的 `analysis` / `chat` 带 `source` 字段：`deepseek`=真实大模型，`rule_fallback`=离线模板（自动降级，附 `reason`）；
-- `GET /api/llm/info` 查看配置状态（不返回 Key）；`GET /health` 也含 `llm` 信息；
+- 返回的 `analysis` / `chat` 带 `source` 字段：`deepseek`（云 API）/ `local-deepseek`（本地）/ `rule_fallback`（离线模板，自动降级并附 `reason`）；
+- `GET /api/llm/info` 查看 provider/mode/model/source（不返回 Key）；`GET /health` 也含 `llm` 信息；
+- 本地模型首次加载约 10~30 秒（显存约 3.5GB），之后常驻；无 GPU 可设 `LOCAL_LLM_DEVICE=cpu`；
 - 大模型只做辅助解释/建议，不替代检测、不编造原因；最终判定人工复核。
 
 ## 5. 目录结构
@@ -161,9 +167,11 @@ backend/
 | 环境变量 | 说明 |
 | --- | --- |
 | `STEELSCAN_API_KEY` | 设置后 `/api*`、`/detect*`、`/model/info` 需要请求头 `X-API-Key` |
-| `DEEPSEEK_API_KEY` | 设置后 analysis/chat 调用 DeepSeek；留空自动降级规则模板 |
+| `DEEPSEEK_API_KEY` | 设置后 analysis/chat 调用 DeepSeek 云 API；留空自动用本地模型或规则模板 |
 | `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | 默认 `https://api.deepseek.com` / `deepseek-chat` |
-| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 大模型超时/重试（默认 40s / 2 次） |
+| `LLM_PROVIDER` | `auto`（默认）/ `deepseek` / `local` |
+| `LOCAL_LLM_MODEL` / `LOCAL_LLM_DEVICE` | 本地模型目录 / `cuda` 或 `cpu` |
+| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 云 API 超时/重试（默认 40s / 2 次） |
 | `STEELSCAN_STORAGE_DIR` | SQLite 与图片存储目录（默认 `storage/`） |
 | `STEELSCAN_DB` | SQLite 文件路径 |
 | `PORT` | `deploy/run_server.sh` 使用的端口 |
@@ -173,7 +181,7 @@ backend/
 
 ## 8. 已知限制与下一步
 
-1. 大模型分析/问答已接入 DeepSeek，但**无 Key/断网时自动降级规则模板**（不伪称实时大模型结果）；演示前请配置 Key 并跑通一次真实调用。
+1. 大模型分析/问答支持 DeepSeek 云 API 与本地 DeepSeek-R1 蒸馏模型；无 Key/断网时自动降级规则模板（不伪称实时大模型结果）；演示前请配置 Key 或下载本地模型并跑通一次真实调用。
 2. WebSocket 首版只推送最终事件，完整 progress/analysis_chunk 流式待补。
 3. `crazing` 弱项：建议后续 960/1280 分辨率、切片推理（SAHI）或现场真实样本补充。
 4. 批量检测（`/detect/batch`）为同步顺序处理，大文件量需改异步任务。

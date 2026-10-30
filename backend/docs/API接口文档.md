@@ -42,20 +42,23 @@ X-API-Key: <你设置的 Key>
 - 可通过 `GET /health` 的 `auth_required` 字段判断服务端是否开启鉴权。
 - 设置方式：`$env:STEELSCAN_API_KEY="your-key"`（PowerShell）/ `export STEELSCAN_API_KEY=...`（Linux）/ Docker 环境变量。
 
-## 1.2 大模型配置（DeepSeek，用于分析/追问）
+## 1.2 大模型配置（DeepSeek 云 API / 本地模型）
 
-服务端配置以下环境变量后，`/api/inspections/{id}/analysis` 与 `/api/chat/messages` 会自动调用 **DeepSeek** 生成分析/回答：
+支持两种大模型来源，`LLM_PROVIDER` 控制：`auto`（默认）→ 有 `DEEPSEEK_API_KEY` 用云 API，否则本地模型存在用本地，否则规则模板；`deepseek` / `local` 可强制指定。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key；留空则使用离线规则模板 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key；留空则用本地模型或规则模板 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容接口地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
-| `LLM_PROVIDER` | `deepseek` | 设为其它值可强制关闭 |
-| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 40 / 2 | 超时秒数 / 重试次数 |
+| `LLM_PROVIDER` | `auto` | `auto` / `deepseek` / `local` |
+| `LOCAL_LLM_MODEL` | `models/DeepSeek-R1-Distill-Qwen-1.5B` | 本地模型目录（`python scripts/download_local_llm.py` 下载） |
+| `LOCAL_LLM_DEVICE` | `cuda` | `cuda` / `cpu` |
+| `LOCAL_LLM_MAX_NEW_TOKENS` | 700 | 本地模型最大生成长度 |
+| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 40 / 2 | 云 API 超时秒数 / 重试次数 |
 
-- 返回结果中的 `source` 字段标识来源：`deepseek`=真实大模型，`rule_fallback`=离线规则模板（未配置/超时/失败自动降级，附带 `reason`）。
-- `GET /api/llm/info` 可查看当前是否已配置（不返回 Key）。
+- 返回结果中的 `source` 字段：`deepseek`=DeepSeek 云 API，`local-deepseek`=本地 DeepSeek-R1 蒸馏模型，`rule_fallback`=离线规则模板（未配置/超时/失败自动降级，附 `reason`）。
+- `GET /api/llm/info` 可查看当前 provider/mode/model/source（不返回 Key）。
 - 大模型只做**辅助解释与建议**，不替代检测、不编造原因；最终判定需人工复核。
 
 ---

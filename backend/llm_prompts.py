@@ -21,6 +21,30 @@ CHAT_SYSTEM = (
 )
 
 
+# 本地小模型（DeepSeek-R1 蒸馏）专用：禁止思考过程，直接给 JSON
+LOCAL_ANALYSIS_SYSTEM = (
+    '你是JSON生成器。只输出一个JSON对象，不要输出思考过程、解释或Markdown代码块。'
+    '字段：facts、references、hypotheses（用可能/建议核实措辞）、recheck_steps、missing_information，'
+    '每个字段都是字符串数组。'
+)
+
+
+def build_analysis_compact_prompt(detections, inspection_id=None):
+    """精简版分析提示词：只给检测事实 + JSON 模板，避免小模型长篇思考。"""
+    lines = ['检测结果（class_id 为团队契约编号）：']
+    if not detections:
+        lines.append('未检出六类目标缺陷。')
+    else:
+        for i, d in enumerate(detections, 1):
+            lines.append('%d. class_id=%s %s(%s) 置信度=%.4f bbox=%s' % (
+                i, d.get('class_id'), d.get('class_name'), d.get('class_cn', ''),
+                float(d.get('confidence', d.get('score', 0))), d.get('bbox_xyxy')))
+    lines += ['', '请只输出 JSON：',
+              '{"facts":["..."],"references":["..."],"hypotheses":["..."],'
+              '"recheck_steps":["..."],"missing_information":["..."]}']
+    return '\n'.join(lines)
+
+
 def build_analysis_user_prompt(detections, inspection_id=None, review_status=None):
     lines = ['当前检测记录：%s' % (inspection_id or '(未提供)'),
              '复核状态：%s' % (review_status or 'pending'), '', '检测结果（class_id 为团队契约编号）：']

@@ -69,6 +69,7 @@ class Verifier:
         self.api_key = api_key
         self.failures = []
         self.checks = []
+        self.expected_source = 'rule_fallback'
 
     def check(self, cond, msg, extra=None):
         self.checks.append({'ok': bool(cond), 'msg': msg})
@@ -141,18 +142,17 @@ class Verifier:
         for key in ('facts', 'references', 'hypotheses', 'recheck_steps', 'missing_information'):
             self.check(key in analysis, 'analysis 含 %s' % key)
         source = analysis.get('source')
-        self.check(source in ('deepseek', 'rule_fallback'), 'analysis source 有效（%s）' % source)
-        live = os.environ.get('DEEPSEEK_API_KEY', '').strip()
-        if live:
-            self.check(source == 'deepseek', '已配置 Key -> analysis 使用 deepseek')
-        else:
-            self.check(source == 'rule_fallback', '未配置 Key -> analysis 自动降级')
+        self.check(source in ('deepseek', 'local-deepseek', 'rule_fallback'),
+                   'analysis source 有效（%s）' % source)
+        self.check(source == self.expected_source,
+                   'analysis source 与配置一致（期望 %s，实际 %s）' % (self.expected_source, source))
+        if self.expected_source == 'rule_fallback':
             self.check('reason' in analysis, '降级带 reason')
         c = requests.post(self.base + '/api/chat/messages', headers=self.headers,
                           json={'context_type': 'inspection', 'context_id': insp,
                                 'question': '这类缺陷可能原因是什么？怎么复检？'}, timeout=180).json()
         self.check(bool(c.get('answer')), 'chat 返回 answer')
-        self.check(c.get('source') in ('deepseek', 'rule_fallback'), 'chat source 有效（%s）' % c.get('source'))
+        self.check(c.get('source') == self.expected_source, 'chat source 与配置一致（%s）' % c.get('source'))
         print('  source =', source, '| model =', analysis.get('model'),
               '| latency_ms =', analysis.get('latency_ms'))
 
@@ -178,7 +178,8 @@ class Verifier:
         rep = requests.get(self.base + '/api/reports/%s' % insp, headers=self.headers, timeout=30).json()
         self.check('质检报告' in rep.get('content_md', ''), '报告含标题')
         li = requests.get(self.base + '/api/llm/info', headers=self.headers, timeout=30).json()
-        self.check(li.get('configured') is bool(live), 'llm/info configured 与 Key 状态一致')
+        self.check(li.get('configured') == (self.expected_source != 'rule_fallback'),
+                   'llm/info configured 与配置一致')
         self.check('api_key' not in json.dumps(li).lower(), 'llm/info 不泄露 Key')
         return insp, task
 
@@ -250,6 +251,10 @@ def main():
             log.flush()
             print(open(log_path, encoding='utf-8', errors='ignore').read()[-2000:])
             return 1
+        li = requests.get(base + '/api/llm/info', headers=headers, timeout=30).json()
+        v.expected_source = li.get('source') if li.get('configured') else 'rule_fallback'
+        print('LLM provider: %s | mode: %s | source: %s' % (
+            li.get('provider'), li.get('mode'), v.expected_source))
         v.step_health()
         if api_key:
             print('\n== 鉴权校验 ==')
