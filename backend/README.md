@@ -19,7 +19,7 @@
 | B-09 批次统计与报告 | ✅（首版） | `/api/batches/{no}/summary` 真实统计；`/api/reports/{id}` Markdown 报告 |
 | B-10 部署与服务配置 | ✅ | 本地脚本 / Docker / 魔搭 Gradio 演示包（见 `deploy/`） |
 | B-11 模型与流程评价 | ✅ | 测试集指标、时延、阈值、失败样例见 `docs/训练实验记录.md` |
-| B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（规则降级 41 项 / 本地大模型 40 项全部通过） |
+| B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（云端/本地 40 项、规则降级 41 项全部通过） |
 
 ## 2. 快速开始
 
@@ -112,7 +112,7 @@ curl -X POST http://127.0.0.1:8000/api/inspections \
 
 完整字段见：**[docs/API接口文档.md](docs/API接口文档.md)**、**[docs/队友API调用文档.md](docs/队友API调用文档.md)**、OpenAPI：[docs/openapi.json](docs/openapi.json)。
 
-验收记录：**[docs/验收记录.md](docs/验收记录.md)**（2026-10-30，真实 HTTP 41 项检查全部通过；真实 DeepSeek 调用待配置 Key 后补测）。
+验收记录：**[docs/验收记录.md](docs/验收记录.md)**（2026-10-30：云端 DeepSeek 40 项、本地模型 40 项、规则降级 41 项真实 HTTP 检查全部通过；云端 `deepseek-chat` 分析约 3s）。
 
 ### 4.3 大模型（DeepSeek 云 API / 本地模型）
 

@@ -95,6 +95,11 @@ def main():
     answer, refs, source = api_v1._answer_question('batch', 'B-1', '怎么办？')
     check(source == 'rule_fallback', 'chat 异常降级')
 
+    # 恢复真实函数，供第 5 步真实调用
+    api_v1.llm.available = orig_available
+    api_v1.llm.chat_json = orig_chat
+    api_v1.llm.source_name = orig_source
+
     print('\n== 4) /api/llm/info 状态 ==')
     info = llm.info()
     check('provider' in info and 'model' in info and 'configured' in info, 'llm/info 字段齐全')
