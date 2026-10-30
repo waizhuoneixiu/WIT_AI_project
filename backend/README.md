@@ -1,4 +1,4 @@
-# backend（队员一：YOLO 模型与后端服务）
+﻿# backend（队员一：YOLO 模型与后端服务）
 
 本目录是 WIT_AI_project 的**后端**：NEU-DET 六类钢材表面缺陷检测模型 + FastAPI 服务 + 团队共同接口（`/api`）+ 部署脚本。
 
@@ -155,7 +155,7 @@ backend/
 - [deliverables/给队员二_App联调包.zip](deliverables/给队员二_App联调包.zip)：接口文档、速查卡、真实响应样例、30 秒自测脚本、现成消息文案
 - [deliverables/给队员三_材料包.zip](deliverables/给队员三_材料包.zip)：指标速查、模型卡、训练/验收记录、图表、接口样例、消息文案
 - [deliverables/发送说明.txt](deliverables/发送说明.txt)：哪个包发谁、发送步骤与安全提醒
-- 真实接口响应样例：[docs/api_samples/](docs/api_samples/)（13 个 JSON，可直接给 App mock）
+- 真实接口响应样例：[docs/api_samples/](docs/api_samples/)（13 个 JSON，可直接给 App mock）\n- 魔搭创空间上传包：[deliverables/魔搭创空间部署包.zip](deliverables/魔搭创空间部署包.zip)（8.35MB，18 个文件）\n- 部署步骤：[docs/魔搭创空间部署步骤.md](docs/魔搭创空间部署步骤.md)
 
 ## 6. 部署
 
@@ -198,3 +198,4 @@ backend/
 
 - 数据：NEU surface defect database（东北大学），学术使用请引用 Song & Yan, Applied Surface Science 285 (2013) 858-864；He et al., IEEE TIM 69(4) (2020) 1493-1504。
 - 框架：ultralytics YOLO26（AGPL-3.0）；比赛演示使用无碍，商业部署需评估授权。
+
