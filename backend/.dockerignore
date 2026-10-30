@@ -1,0 +1,14 @@
+data/
+runs/
+.vs/
+__pycache__/
+*.pyc
+*.log
+.env
+reports/
+storage/
+docs/
+deploy/
+tests/
+*.md
+!README_后端说明.md

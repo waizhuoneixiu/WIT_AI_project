@@ -1,0 +1,14 @@
+# SteelScan 后端依赖（conda env AIvision / Python 3.12）
+# torch 需要 CUDA 安全源安装（PyPI 的 Windows 版是 CPU-only）：
+#   pip install torch==2.14.1+cu130 torchvision==0.29.1+cu130 --index-url https://download.pytorch.org/whl/cu130
+ultralytics==8.4.193
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+opencv-python>=5.0
+numpy>=2.5
+pillow>=12.0
+fastapi>=0.162
+uvicorn>=0.54
+python-multipart>=0.0.32
+pydantic>=2.14
+requests>=2.34
