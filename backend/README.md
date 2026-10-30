@@ -19,7 +19,7 @@
 | B-09 批次统计与报告 | ✅（首版） | `/api/batches/{no}/summary` 真实统计；`/api/reports/{id}` Markdown 报告 |
 | B-10 部署与服务配置 | ✅ | 本地脚本 / Docker / 魔搭 Gradio 演示包（见 `deploy/`） |
 | B-11 模型与流程评价 | ✅ | 测试集指标、时延、阈值、失败样例见 `docs/训练实验记录.md` |
-| B-12 交付与演示恢复 | ⏳ | 启动/故障恢复说明见本 README 与 `deploy/`；演示前按需补充演练记录 |
+| B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（41 项全过） |
 
 ## 2. 快速开始
 
@@ -47,6 +47,7 @@ python scripts/smoke_test_backend.py     # 环境/低层接口/文档
 python scripts/test_auth.py              # API Key 401/200
 python scripts/test_api_contract.py      # /api 端到端：检测→任务→详情→分析→问答→复核→统计→报告→WS
 python scripts/test_llm.py               # DeepSeek 集成：mock 成功/失败降级；有真实 Key 时额外真实调用
+python scripts/verify_backend_full.py    # 真实 HTTP 端到端验收（独立进程 + 鉴权 + 41 项检查）
 ```
 
 ## 3. 模型与数据
@@ -110,6 +111,8 @@ curl -X POST http://127.0.0.1:8000/api/inspections \
 静态标注图：`/files/<inspection_id>_pred.jpg`。
 
 完整字段见：**[docs/API接口文档.md](docs/API接口文档.md)**、**[docs/队友API调用文档.md](docs/队友API调用文档.md)**、OpenAPI：[docs/openapi.json](docs/openapi.json)。
+
+验收记录：**[docs/验收记录.md](docs/验收记录.md)**（2026-10-30，真实 HTTP 41 项检查全部通过；真实 DeepSeek 调用待配置 Key 后补测）。
 
 ### 4.3 大模型（DeepSeek）
 

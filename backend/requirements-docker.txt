@@ -10,3 +10,4 @@ pydantic>=2.14
 requests>=2.34
 python-dotenv>=1.2
 openai>=3.41
+websockets>=15.0
