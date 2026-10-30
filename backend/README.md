@@ -1,4 +1,4 @@
-﻿# backend（队员一：YOLO 模型与后端服务）
+# backend（队员一：YOLO 模型与后端服务）
 
 本目录是 WIT_AI_project 的**后端**：NEU-DET 六类钢材表面缺陷检测模型 + FastAPI 服务 + 团队共同接口（`/api`）+ 部署脚本。
 
@@ -17,7 +17,7 @@
 | B-07 知识与大模型 | ✅ 已接入 DeepSeek（云端 + 本地，可降级） | analysis/chat 支持 DeepSeek 云 API 或本地 DeepSeek-R1 蒸馏模型（transformers，无需 Key），失败/无配置自动降级规则模板；返回 `source` 字段；字段 facts/references/hypotheses/recheck_steps/missing_information |
 | B-08 WebSocket | ⏳ 首版 | `/ws/tasks/{task_id}` 推送 accepted/completed；断线恢复走 `GET /api/tasks/{id}` |
 | B-09 批次统计与报告 | ✅（首版） | `/api/batches/{no}/summary` 真实统计；`/api/reports/{id}` Markdown 报告 |
-| B-10 部署与服务配置 | ✅ | 本地脚本 / Docker / 魔搭 Gradio 演示包（见 `deploy/`） |
+| B-10 部署与服务配置 | ✅ | 本地脚本 / Docker / 魔搭 Gradio 演示包（见 `deploy/`）；**魔搭已上线**：https://modelscope.cn/studios/waizhuoneixiu/steelscan-demo |
 | B-11 模型与流程评价 | ✅ | 测试集指标、时延、阈值、失败样例见 `docs/训练实验记录.md` |
 | B-12 交付与演示恢复 | ✅ 首版 | 启动/自检/恢复说明见本 README、`docs/验收记录.md`、`deploy/`；验收脚本 `scripts/verify_backend_full.py`（云端/本地 40 项、规则降级 41 项全部通过） |
 
@@ -155,7 +155,10 @@ backend/
 - [deliverables/给队员二_App联调包.zip](deliverables/给队员二_App联调包.zip)：接口文档、速查卡、真实响应样例、30 秒自测脚本、现成消息文案
 - [deliverables/给队员三_材料包.zip](deliverables/给队员三_材料包.zip)：指标速查、模型卡、训练/验收记录、图表、接口样例、消息文案
 - [deliverables/发送说明.txt](deliverables/发送说明.txt)：哪个包发谁、发送步骤与安全提醒
-- 真实接口响应样例：[docs/api_samples/](docs/api_samples/)（13 个 JSON，可直接给 App mock）\n- 魔搭创空间上传包：[deliverables/魔搭创空间部署包.zip](deliverables/魔搭创空间部署包.zip)（8.35MB，18 个文件）\n- 部署步骤：[docs/魔搭创空间部署步骤.md](docs/魔搭创空间部署步骤.md)
+- [deliverables/魔搭创空间部署包.zip](deliverables/魔搭创空间部署包.zip)：魔搭创空间上传包（8.35MB，18 个文件）
+- 真实接口响应样例：[docs/api_samples/](docs/api_samples/)（13 个 JSON，可直接给 App mock）
+- 部署步骤：[docs/魔搭创空间部署步骤.md](docs/魔搭创空间部署步骤.md)
+- **线上演示（已部署）**：https://modelscope.cn/studios/waizhuoneixiu/steelscan-demo
 
 ## 6. 部署
 
@@ -166,7 +169,10 @@ backend/
   docker run -d --name steelscan-api -p 8000:8000 \
     -e STEELSCAN_API_KEY=你的KEY steelscan-api:1.2
   ```
-- **魔搭创空间（演示页）**：`deploy/modelscope_package/`（ONNX CPU 推理，无需 PyTorch），上传后自动运行得到公网链接；步骤见包内 `README_部署说明.md`。
+- **魔搭创空间（已上线）**：https://modelscope.cn/studios/waizhuoneixiu/steelscan-demo
+  - 直接访问：https://waizhuoneixiu-steelscan-demo.ms.show
+  - Gradio API：`https://studio-waizhuoneixiu-steelscan-demo.api-inference.modelscope.net`（`Authorization: Bearer <魔搭访问令牌>`）
+  - 配置：Gradio 6.29.1 / 免费 CPU / 公开；入口 `app.py`；部署记录见 [docs/魔搭部署记录.md](docs/魔搭部署记录.md)
 - **队友临时联调**：`docs/内网穿透联调步骤.md`（cpolar / ngrok / 花生壳）。
 
 ## 7. 配置与安全
