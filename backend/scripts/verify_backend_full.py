@@ -188,7 +188,7 @@ class Verifier:
         try:
             from websockets.sync.client import connect
             ws_url = self.base.replace('http://', 'ws://').replace('https://', 'wss://')
-            with connect(ws_url + '/ws/tasks/%s' % task, open_timeout=10) as ws:
+            with connect(ws_url + '/ws/tasks/%s' % task, additional_headers=self.headers, open_timeout=10) as ws:
                 e1 = json.loads(ws.recv(timeout=10))
                 e2 = json.loads(ws.recv(timeout=10))
                 self.check(e1.get('type') == 'accepted', '收到 accepted 事件')

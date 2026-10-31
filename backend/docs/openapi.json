@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "SteelScan 缺陷检测 API",
-    "version": "1.2.0",
-    "description": "SteelScan 热轧带钢表面缺陷检测后端 API（YOLO26n @640）"
+    "version": "1.3.0",
+    "description": "SteelScan 轻量业务 API：YOLO26n@640 魔搭云检测、同步HTTP、完整复核与Markdown报告。多数响应尚未声明response_model，完整响应结构另见docs/api_samples；OpenAPI导出不验证云连通性。"
   },
   "paths": {
     "/api/llm/info": {
@@ -583,6 +583,49 @@
         }
       }
     },
+    "/files/{filename}": {
+      "get": {
+        "summary": "Image File",
+        "operationId": "image_file_files__filename__get",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "API Key（服务端设置 STEELSCAN_API_KEY 后必填）",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key（服务端设置 STEELSCAN_API_KEY 后必填）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",
@@ -978,20 +1021,15 @@
             "title": "Notes"
           },
           "base_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "minimum": 0.0,
             "title": "Base Version"
           }
         },
         "type": "object",
         "required": [
-          "review_status"
+          "review_status",
+          "base_version"
         ],
         "title": "ReviewRequest"
       },

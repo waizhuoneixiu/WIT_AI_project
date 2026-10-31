@@ -4,6 +4,17 @@ import os
 
 DEV = os.path.dirname(os.path.abspath(__file__))
 
+
+def load_dotenv_if_present():
+    """Load private settings before reading them; explicit environment values win."""
+    path = os.path.join(DEV, '.env')
+    if os.path.isfile(path):
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+
+
+load_dotenv_if_present()
+
 # ---------- 数据 ----------
 DATA_DIR = os.path.join(DEV, 'data', 'neu_det')
 DATA_YAML = os.path.join(DATA_DIR, 'data.yaml')
@@ -27,6 +38,12 @@ DEFAULT_IMGSZ = 640
 DEFAULT_CONF = 0.25
 DEFAULT_IOU = 0.45
 DEFAULT_DEVICE = 0  # 0=GPU, 'cpu'=CPU
+DETECTOR_PROVIDER = os.environ.get('DETECTOR_PROVIDER', 'modelscope').strip().lower()
+MODELSCOPE_BASE_URL = os.environ.get(
+    'MODELSCOPE_BASE_URL',
+    'https://studio-waizhuoneixiu-steelscan-demo.api-inference.modelscope.net').rstrip('/')
+MODELSCOPE_API_TOKEN = os.environ.get('MODELSCOPE_API_TOKEN', '').strip()
+MODELSCOPE_TIMEOUT = float(os.environ.get('MODELSCOPE_TIMEOUT', '60'))
 
 # ---------- 报告 ----------
 REPORTS_DIR = os.path.join(DEV, 'reports')
@@ -48,16 +65,5 @@ LOW_CONF_THRESHOLD = float(os.environ.get('LOW_CONF_THRESHOLD', '0.45'))
 NG_CONF_THRESHOLD = float(os.environ.get('NG_CONF_THRESHOLD', '0.25'))
 
 # ---------- 后端安全 ----------
-# 设置该环境变量后，/detect* 与 /model/info 接口需要请求头 X-API-Key；留空则不鉴权（仅本机/内网用）
+# /api、/detect、/model/info 与图片共用业务鉴权；留空仅用于本机调试。
 API_KEY = os.environ.get('STEELSCAN_API_KEY', '')
-
-
-def load_dotenv_if_present():
-    """若存在 .env 则加载（不覆盖已有环境变量）。"""
-    try:
-        from dotenv import load_dotenv
-        p = os.path.join(DEV, '.env')
-        if os.path.exists(p):
-            load_dotenv(p, override=False)
-    except Exception:
-        pass

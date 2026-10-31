@@ -1,0 +1,124 @@
+{
+  "inspection_id": "INSP-20261030220326-1AD8DB",
+  "batch_no": "FIXTURE-BATCH-001",
+  "workpiece_no": "SAMPLE-W1",
+  "image_width": 200,
+  "image_height": 200,
+  "model_version": "fixture-not-yolo",
+  "detections": [
+    {
+      "detection_id": "DET-20261030220326-D2615D",
+      "class_id": 2,
+      "class_name": "patches",
+      "score": 0.88,
+      "bbox_xyxy": [
+        40.0,
+        50.0,
+        140.0,
+        150.0
+      ]
+    }
+  ],
+  "reviewed_detections": [
+    {
+      "detection_id": "DET-20261030220326-D2615D",
+      "class_id": 1,
+      "class_name": "inclusion",
+      "class_cn": "夹杂",
+      "bbox_xyxy": [
+        30.0,
+        40.0,
+        130.0,
+        140.0
+      ],
+      "score": null,
+      "source": "manual"
+    },
+    {
+      "detection_id": "e41c00b2-0ac6-4fd3-9932-6931b4d978ab",
+      "class_id": 5,
+      "class_name": "scratches",
+      "class_cn": "划痕",
+      "bbox_xyxy": [
+        150.0,
+        20.0,
+        180.0,
+        160.0
+      ],
+      "score": null,
+      "source": "manual"
+    }
+  ],
+  "review_version": 1,
+  "review_invalid": false,
+  "analysis": {
+    "facts": [
+      "检出 1 处缺陷：",
+      "斑块（模型分数 0.88）位于 [40.0, 50.0, 140.0, 150.0]"
+    ],
+    "references": [
+      "斑块：斑块/色差，区域状亮度或纹理异常，边界模糊。"
+    ],
+    "hypotheses": [
+      "斑块可能原因：局部氧化/酸洗不均",
+      "斑块可能原因：乳化液或水迹残留",
+      "斑块可能原因：轧辊表面状态异常"
+    ],
+    "recheck_steps": [
+      "斑块：确认是否影响后续涂镀",
+      "斑块：检查轧辊与乳化液状态",
+      "斑块：跟踪同批次相邻卷"
+    ],
+    "missing_information": [
+      "现场光照/拍摄参数",
+      "工艺与批次参数",
+      "人工复判结论"
+    ],
+    "source": "rule_fallback",
+    "reason": "未配置 DEEPSEEK_API_KEY（离线规则模板）",
+    "review_version": 0,
+    "created_at": "2026-10-30T22:03:26",
+    "stale": true
+  },
+  "timing": {
+    "inference_ms": 0,
+    "total_ms": 0.07
+  },
+  "review_status": "corrected",
+  "review": {
+    "review_status": "corrected",
+    "reviewer": "sample-operator",
+    "payload": {
+      "corrections": [
+        {
+          "op": "update",
+          "detection_id": "DET-20261030220326-D2615D",
+          "class_id": 1,
+          "bbox_xyxy": [
+            30.0,
+            40.0,
+            130.0,
+            140.0
+          ]
+        },
+        {
+          "op": "add",
+          "detection_id": "e41c00b2-0ac6-4fd3-9932-6931b4d978ab",
+          "class_id": 5,
+          "bbox_xyxy": [
+            150.0,
+            20.0,
+            180.0,
+            160.0
+          ]
+        }
+      ],
+      "notes": "示例：调整原框并补充人工框"
+    },
+    "base_version": 0,
+    "created_at": "2026-10-30T22:03:27"
+  },
+  "annotated_url": "/files/INSP-20261030220326-1AD8DB_pred.jpg",
+  "original_url": "/files/INSP-20261030220326-1AD8DB.png",
+  "created_at": "2026-10-30T22:03:26"
+}

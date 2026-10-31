@@ -1,14 +1,14 @@
-# 共同接口与协作约定（v0.1，首次联调前共同确认）
+# 共同接口与实现约定
 
-本任务书依据《钢材表面缺陷质检项目计划书-NEU版》拆分。三人共同完成“App选图并输入批次号 → YOLO检测 → 查看证据 → 知识辅助问答与复检建议 → 人工确认 → 记录与报告”的最小可演示流程。首轮优先Android与单图全流程，再扩展批量处理；语音、iOS、复杂工单和新算法研究列为后续任务。
+更新日期：2026年10月30日。已有 FastAPI `/api` 业务接口、SQLite、DeepSeek/规则降级和魔搭 Gradio 检测；本轮先修订契约，再实现云适配和 Android App。**本轮补齐字段已有代码；2026-10-30无网络fixture验证了两轮完整复核、分析stale和报告历史，见[当前样例说明](../../backend/docs/api_samples/README.md)。这不代表真实云路径或Android已验收。**
 
-默认YOLO与业务后端在工位电脑运行，App通过局域网访问，云端大模型通过后端API调用。若启用魔搭等远程托管，三人统一标注实际部署位置；托管可用性需实测，不能把上传权重当作已完成部署。工位模式断外网但局域网正常时仍可检测；手机内部离线推理不属于首轮交付。
+## 1. 固定架构与类别
 
-### A. 数据、类别与判断口径
+Android（KMP + Compose）通过同步 HTTP 访问本机轻量业务 API；业务 API 调用魔搭已部署的 YOLO26n@640（Ultralytics 8.4.193 导出 ONNX，云端运行）并在 SQLite 保存结果。分析/问答调用 DeepSeek 云 API，无 Key 或失败时明确降级规则模板。本机不安装 YOLO、PyTorch、ONNX Runtime 或本地大模型；云不可达时无离线检测。
 
-使用NEU-DET检测版。计划基于1800张、六类缺陷图片开展实验，实际文件和标注由队员一检查。拟采用70%/15%/15%划分；完整且无需排除文件时对应1260/270/270张。先检查重复与来源相关性，再冻结文件清单，训练增强不得跨集合。训练、测试和演示使用的数据身份应明确。
+魔搭仅提供 Gradio 检测：上传 → `/gradio_api/call/detect_ui` → SSE 取完成结果；它不提供业务 `/api`。前端不能直接使用魔搭地址替换业务 API 地址，魔搭和 DeepSeek 令牌只留后端。本轮默认 DETECTOR_PROVIDER=modelscope、LLM_PROVIDER=deepseek，魔搭云调用预算60秒，各阶段以剩余预算设置连接/读取超时；底层阻塞可能延至当前网络超时，并非强制取消的硬截止；模型标识为 yolo26n-640-onnx、imgsz固定640。部署事实见 [魔搭记录](../../backend/docs/魔搭部署记录.md)。
 
-| 项目统一class_id | 英文标签 | 中文名称 |
+| class_id | class_name | 中文 |
 |---:|---|---|
 | 0 | crazing | 龟裂 / 网状裂纹 |
 | 1 | inclusion | 夹杂 |
@@ -17,46 +17,84 @@
 | 4 | rolled-in_scale | 轧入氧化皮 |
 | 5 | scratches | 划痕 |
 
-以上是本项目拟定的编号，转换脚本、训练配置、模型输出、App与报告必须一致，不能直接假定原始文件使用相同顺序。
+模型原始训练顺序不同，后端已映射为上表；前端不得再按训练编号重映射。`bbox_xyxy=[x1,y1,x2,y2]` 是统一方向后原图像素坐标、左上角原点。框不代表毫米尺寸或真实缺陷面积；空检出不是合格结论。
 
-未检出框显示“未检出六类目标缺陷”，不直接判“合格”。模型分数不表示产品合格概率；边界框不作为真实缺陷面积或毫米尺寸。大模型输出是辅助建议，人工复核另存，不覆盖原预测。
+## 2. HTTP 主流程与状态
 
-### B. 前后端接口与消息约定
+接口地址、类字段及基础响应以实际服务 OpenAPI 为准，现有响应样例见 [api_samples](../../backend/docs/api_samples/)。当前样例由明确标记的fixture生成，保留实际API响应形状；不能用于云服务可用性或模型精度证明。
 
-下表是开发设计，不是已经上线的接口。队员一提供实现与字段定义，队员二确认客户端可用，队员三维护说明与合成样例。前期可使用合成返回值联调，录制最终演示时明确区分合成样例与真实模型调用。
-
-| 拟定接口 | 三人共同使用的用途 |
+| 方法与路径 | 本轮使用方式 |
 |---|---|
-| POST /api/inspections | 上传图片、批次号、可选工件编号，返回inspection_id与检测task_id |
-| GET /api/inspections | 按批次、类别、时间、复核状态分页查询历史 |
-| GET /api/inspections/{id} | 查询检测状态、图像尺寸、原始预测、人工复核及版本 |
-| GET /api/tasks/{task_id} | 查询检测/分析/问答任务的状态与已生成结果，供断线恢复 |
-| POST /api/inspections/{id}/analysis | 为指定结果版本生成建议，返回分析task_id |
-| POST /api/chat/messages | 提交问题和inspection_id或batch_id上下文，返回回答task_id |
-| POST /api/inspections/{id}/review | 保存人工判断、修正框/类别、备注及所依据的记录版本 |
-| GET /api/batches/{id}/summary | 查询由已保存记录计算的真实统计 |
-| GET /api/reports/{id} | 查询报告；具体下载方式与文件格式首次联调时确定 |
-| WS /ws/tasks/{task_id} | 推送进度、检测结果、分析片段、完成或失败事件 |
+| `GET /health`、`GET /model/info` | 业务与检测服务状态、部署和版本；健康响应不等于云推理已成功 |
+| `POST /api/inspections` | multipart `image`、必填 `batch_no`、可选 `workpiece_no`；同步检测并保存，201 返回 inspection_id/task_id/status=completed |
+| `GET /api/inspections` | batch_no/class_id/review_status/page/page_size 筛选分页；本轮修复 total 随筛选一致，不承诺时间筛选 |
+| `GET /api/inspections/{id}` | 原预测、复核结果、原图、最新分析与版本；新增字段见下一节 |
+| `GET /api/tasks/{task_id}` | 已知编号的最终任务快照；不保证未知上传的自动恢复 |
+| `POST /api/inspections/{id}/analysis` | 同步返回 analysis 与 task_id，保留模型证据和对应复核版本 |
+| `POST /api/chat/messages` | JSON context_type=inspection/batch、context_id、question；同步返回 answer/references/source/task_id/review_version/stale |
+| `POST /api/inspections/{id}/review` | 保存完整复核差异与状态，必带 base_version；详见第4节 |
+| `GET /api/batches/{batch_no}/summary` | image_count、model_box_count、per_class、review_stats、confirmed_count、unresolved_count |
+| `GET /api/reports/{id}` | Markdown 报告 JSON：report_id、inspection_id、format、content_md、created_at；本轮补 review_version |
+| `GET /api/class-map`、`GET /api/llm/info` | 类别映射、分析服务信息，不返回云令牌 |
 
-检测任务状态统一为queued、running、completed、failed；复核状态单独表示pending、confirmed、corrected、unresolved。检测完成不等于已人工确认；分析失败也不改变已完成的检测结果。
+批次号可包含斜杠，例如 `BATCH/2026-001`。客户端将完整批次号作为URL路径参数编码后请求汇总（如 `/api/batches/BATCH%2F2026-001/summary`）；服务端使用 `{batch_no:path}` 接收完整值。OpenAPI显示仍为 `{batch_no}`，不要据此截断或禁止斜杠；历史查询参数和聊天context_id保留同一完整批次号。
 
-WebSocket信封包含task_id、event_id、type、data。type至少有accepted、progress、detection_result、analysis_chunk、completed、error。event_id用于去重；断线后通过GET /api/tasks/{task_id}查询任务状态与已生成结果，再恢复展示。字段和事件调整须同步三份说明，不由单人静默改名。
+聊天回答和任务result的review_version是实际读取用于回答的图片复核版本，批次上下文为null；生成期间该图片复核版本变化时stale=true，前端提示依据已过时。
 
-检测结果至少包括inspection_id、image_width、image_height、model_version、detections、timing；每个框包括detection_id、class_id、class_name、score、bbox_xyxy。bbox_xyxy使用原图像素坐标[x1,y1,x2,y2]，原点在左上角；缩放、旋转与显示坐标转换由前后端联调确认。
+已有 WS `/ws/tasks/{task_id}` 在accept前校验X-API-Key；开启业务鉴权而Key缺失/错误时close 1008，正确时只回放 accepted/completed（无任务则 error），本轮 App 不依赖它；不实现 progress/analysis_chunk。UI 使用等待/成功/失败，不能把队列和流式状态写成已支持。
 
-大模型输出区分facts（检测事实）、references（知识依据）、hypotheses（参考原因）、recheck_steps（复检步骤）、missing_information（待补信息）。批次统计由后端计算，助手只负责解释；无知识或现场信息时不编造规则、设备故障和工艺根因。
+上传校验：jpg/jpeg/png/bmp，非空且不超过10MB，批次非空；解码或云调用失败不可生成成功记录。云模式请求非640输入尺寸返回422。开启业务鉴权时 /files 图片请求同样携带 X-API-Key。HTTP 400/422 表示输入问题，401 为业务鉴权错误，404 为不存在，409 为复核冲突；云503表示配置/魔搭鉴权问题，502表示上游网络或无效响应，504表示超时。上传结果未知时不自动重新 POST，先查询历史或由用户明确重试。
 
-### C. 日期、交接与发布门槛
+## 3. 详情、分析与统计
 
-| 时间 | 三人共同里程碑 |
+现有详情含 inspection_id、batch_no、workpiece_no、image_width/image_height、model_version、detections、timing、review_status、review、annotated_url、created_at。
+
+本轮补齐：
+
+- `original_url`：持久化、统一方向后的原图地址，前端用它与返回尺寸绘框。
+- `review_version`：当前非负整数，未复核为0。
+- `review_invalid`：历史复核差异损坏/非法时为true，详情回退原模型框以便人工修复；生成分析或报告返回409，提交合法完整差异或[]后恢复。
+- `reviewed_detections`：对不可变 `detections` 应用最近一次完整差异后的有效框；无差异时与原预测相同。
+- 有效框含 detection_id、class_id、class_name、bbox_xyxy、source；原框 source=model 且保留 score，人工新增/修改框 source=manual 且 score=null。
+- `analysis`：最新分析对象或 null，保留 facts/references/hypotheses/recheck_steps/missing_information/source，附 review_version、stale、created_at。当前复核版本变化后旧分析 stale=true，不伪装成新结果。
+
+复核状态独立于检测：pending/confirmed/corrected/unresolved。原模型 `detections` 永不覆盖。批次 `per_class` 和 `model_box_count` 仍统计原预测；`confirmed_count` 是 confirmed+corrected 的图片数，不是人工确认的缺陷框数。首轮不新增“复核后类别统计”。
+
+报告必须明确区分原预测、人工结果与备注、复核版本、分析来源及其过时状态。`GET /api/reports/{inspection_id}` 按当前复核生成内容；已有 report_id 是对应版本的保存结果，不能把旧报告标成当前版本。
+
+## 4. 完整框编辑与复核请求（本轮补齐）
+
+`review_status`、`reviewer`、`notes` 保留；`base_version` 必填非负整数并与当前 review_version 匹配，否则422/409，不允许静默覆盖。
+
+`corrections` 是**相对原始 detections 的完整差异集合**，不是相对上次复核的增量：
+
+| op | 字段与含义 |
 |---|---|
-| 10月30—31日 | 确认范围、类别编号、接口合成样例、页面和数据划分 |
-| 11月1—3日 | 模型首个可用结果、App合成数据页面、首批知识与文档 |
-| 11月4—6日 | App与真实后端、YOLO、大模型及复核保存联通 |
-| 11月7—8日 | 冻结首轮版本，完成实验、流程测试与失败分析 |
-| 11月9日 | 争取完成材料首次上传和可重复演示 |
-| 11月10日前 | 按学校与赛事实际截止要求完成检查与提交 |
+| add | 新 UUID detection_id、class_id、bbox_xyxy；增加人工框 |
+| update | 原预测的 detection_id、class_id、bbox_xyxy；修改类别或位置 |
+| delete | 原预测的 detection_id；移除该原框 |
 
-以上是团队工作安排，提交日期仍由队员三核对最新通知及校内要求。每天用“已完成、当前阻碍、需要谁提供什么、下次交付”四项同步；接口问题当天提出。11月6日后优先修复和测试，不随意增加功能。
+示例（合成编号）：
 
-所有性能与效率数值在实测前均为目标。沿用总计划的500—1500元内部预算，云托管、商业许可和新硬件另行核算。密钥只放后端受保护配置，提交文件不包含真实密钥、聊天凭据或私人联系方式。
+```json
+{
+  "review_status": "corrected",
+  "reviewer": "operator-1",
+  "notes": "调整位置并补充漏检",
+  "base_version": 0,
+  "corrections": [
+    {"op": "update", "detection_id": "DET-example", "class_id": 2, "bbox_xyxy": [20, 30, 80, 100]},
+    {"op": "add", "detection_id": "e41c00b2-0ac6-4fd3-9932-6931b4d978ab", "class_id": 5, "bbox_xyxy": [110, 20, 130, 160]}
+  ]
+}
+```
+
+差异内 detection_id 唯一；update/delete 必须引用此图片原预测，add 不可占用原 ID。坐标必须为有限数且满足 `0 ≤ x1 < x2 ≤ image_width`、`0 ≤ y1 < y2 ≤ image_height`，class_id 必须0–5；后端验证，不能只信任界面。
+
+再次编辑人工框时修改对应 add；删除人工框时从完整差异中移除该 add；恢复原框时移除对应 update/delete。兼容旧请求：无 op 的条目按 update；corrections 省略/null 保留最近差异，`[]` 显式恢复原预测。新 App 总是发送完整列表。
+
+提交成功返回 inspection_id、review_status、review_version。保存后重新读取详情，验证 reviewed_detections 一致；409 保留草稿供比较，刷新后重新确认，不自动合并覆盖。
+
+## 5. 协作与发布
+
+先修文档，再实现云适配和 Android；不重新训练已有模型或下载本地模型。UI 编写前必须读取 [Aboard 设计参考](../../frontend/Aboard-design.md)。具体阶段见 [Roadmap](../roadmap.md)，检查见 [验收计划](05-integration-acceptance.md)。代码、接口样例和文档同步更新后才标记完成；历史模型/后端验证不能替代新路径验收。

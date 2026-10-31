@@ -1,42 +1,49 @@
 {
-  "inspection_id": "INSP-20261030173736-6DC741",
-  "batch_no": "SAMPLE-BATCH-001",
+  "inspection_id": "INSP-20261030220326-1AD8DB",
+  "batch_no": "FIXTURE-BATCH-001",
   "workpiece_no": "SAMPLE-W1",
   "image_width": 200,
   "image_height": 200,
-  "model_version": "best.pt",
+  "model_version": "fixture-not-yolo",
   "detections": [
     {
-      "detection_id": "DET-20261030173742-C51CE9",
+      "detection_id": "DET-20261030220326-D2615D",
       "class_id": 2,
       "class_name": "patches",
-      "score": 0.8832,
+      "score": 0.88,
       "bbox_xyxy": [
-        62.23,
-        68.4,
-        136.18,
-        160.79
-      ]
-    },
-    {
-      "detection_id": "DET-20261030173742-864BDA",
-      "class_id": 2,
-      "class_name": "patches",
-      "score": 0.8072,
-      "bbox_xyxy": [
-        7.98,
-        95.96,
-        45.08,
-        133.11
+        40.0,
+        50.0,
+        140.0,
+        150.0
       ]
     }
   ],
+  "reviewed_detections": [
+    {
+      "detection_id": "DET-20261030220326-D2615D",
+      "class_id": 2,
+      "class_name": "patches",
+      "score": 0.88,
+      "bbox_xyxy": [
+        40.0,
+        50.0,
+        140.0,
+        150.0
+      ],
+      "source": "model"
+    }
+  ],
+  "review_version": 0,
+  "review_invalid": false,
+  "analysis": null,
   "timing": {
-    "inference_ms": 41.7,
-    "total_ms": 5640.22
+    "inference_ms": 0,
+    "total_ms": 0.07
   },
   "review_status": "pending",
   "review": null,
-  "annotated_url": "/files/INSP-20261030173736-6DC741_pred.jpg",
-  "created_at": "2026-10-30T17:37:42"
+  "annotated_url": "/files/INSP-20261030220326-1AD8DB_pred.jpg",
+  "original_url": "/files/INSP-20261030220326-1AD8DB.png",
+  "created_at": "2026-10-30T22:03:26"
 }

@@ -21,12 +21,14 @@ import cv2
 import numpy as np
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile,
                      WebSocket, WebSocketDisconnect)
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 import contract
 import llm
 import llm_prompts
 import runtime
+import review_snapshot
 import storage
 from config import CLASSES_CN
 from security import verify_api_key
@@ -75,9 +77,13 @@ KNOWLEDGE = {
 # 工具
 # ---------------------------------------------------------------------------
 def _decode(file_bytes):
+    if not file_bytes:
+        return None
     arr = np.frombuffer(file_bytes, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    return img
+    try:
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except cv2.error:
+        return None
 
 
 def _annotated(img, defects):
@@ -111,6 +117,7 @@ def _inspection_summary(row):
         'image_height': row['height'],
         'model_version': row['model_version'],
         'review_status': row['review_status'],
+        'review_version': row['review_version'],
         'created_at': row['created_at'],
         'annotated_url': ('/files/%s' % os.path.basename(row['annotated_path'])) if row['annotated_path'] else None,
     }
@@ -126,7 +133,17 @@ def _inspection_detail(row, det_rows):
             'score': r['score'],
             'bbox_xyxy': json.loads(r['bbox_json']),
         })
-    review = storage.get_latest_review(row['inspection_id'])
+    review = row['review']
+    corrections = ((review['payload'] or {}).get('corrections') or []) if review else []
+    review_invalid = False
+    try:
+        _, reviewed = review_snapshot.apply_corrections(detections, corrections, row['width'], row['height'])
+    except ValueError:
+        review_invalid = True
+        _, reviewed = review_snapshot.apply_corrections(detections, [], row['width'], row['height'])
+    analysis = row['analysis']
+    if analysis:
+        analysis = dict(analysis, stale=analysis.get('review_version') != row['review_version'])
     return {
         'inspection_id': row['inspection_id'],
         'batch_no': row['batch_no'],
@@ -135,21 +152,27 @@ def _inspection_detail(row, det_rows):
         'image_height': row['height'],
         'model_version': row['model_version'],
         'detections': detections,
+        'reviewed_detections': reviewed,
+        'review_version': row['review_version'],
+        'review_invalid': review_invalid,
+        'analysis': analysis,
         'timing': json.loads(row['timing_json']) if row['timing_json'] else {},
         'review_status': row['review_status'],
         'review': ({'review_status': review['review_status'], 'reviewer': review['reviewer'],
                     'payload': review['payload'], 'base_version': review['base_version'],
                     'created_at': review['created_at']} if review else None),
         'annotated_url': ('/files/%s' % os.path.basename(row['annotated_path'])) if row['annotated_path'] else None,
+        'original_url': '/files/%s' % os.path.basename(row['image_path']),
         'created_at': row['created_at'],
     }
 
 
-def _rule_analysis(detections):
+def _rule_analysis(detections, original_detections=None):
     """规则模板兜底：事实/引用/参考原因/复检步骤/待补信息分离输出。"""
     if not detections:
         return {
-            'facts': ['本图未检出六类目标缺陷；不等同于产品合格判定。'],
+            'facts': [('当前复核结果无缺陷框，原模型结果另存；不等同于产品合格判定。'
+                       if original_detections else '本图未检出六类目标缺陷；不等同于产品合格判定。')],
             'references': [],
             'hypotheses': [],
             'recheck_steps': ['确认拍摄条件（光照/对焦/角度）', '必要时人工目检复核'],
@@ -159,7 +182,9 @@ def _rule_analysis(detections):
     references, hypotheses, steps = [], [], []
     seen = set()
     for d in detections:
-        facts.append('%s(%.2f) 位于 %s' % (d['class_cn'] or d['class_name'], d['confidence'], d['bbox_xyxy']))
+        confidence = d.get('confidence', d.get('score'))
+        label = '人工修正' if confidence is None else '模型分数 %.2f' % confidence
+        facts.append('%s（%s）位于 %s' % (d.get('class_cn') or d['class_name'], label, d['bbox_xyxy']))
         name = d['class_name']
         if name in seen:
             continue
@@ -178,9 +203,14 @@ def _rule_analysis(detections):
     }
 
 
-def _analysis_for(detections, inspection_id=None, review_status=None):
+def _analysis_detections(detections):
+    return [dict(d, class_cn=CLASSES_CN.get(d['class_name'], d['class_name']),
+                 confidence=d['score']) for d in detections]
+
+
+def _analysis_for(detections, inspection_id=None, review_status=None, original_detections=None):
     """优先调用 DeepSeek 大模型；未配置/失败时降级规则模板，并标注来源。"""
-    rule = _rule_analysis(detections)
+    rule = _rule_analysis(detections, original_detections)
     if not llm.available():
         rule['source'] = 'rule_fallback'
         rule['reason'] = '未配置 DEEPSEEK_API_KEY（离线规则模板）'
@@ -189,7 +219,7 @@ def _analysis_for(detections, inspection_id=None, review_status=None):
         try:
             result = llm.chat_json(
                 llm_prompts.ANALYSIS_SYSTEM,
-                llm_prompts.build_analysis_user_prompt(detections, inspection_id, review_status),
+                llm_prompts.build_analysis_user_prompt(detections, inspection_id, review_status, original_detections),
             )
         except Exception:
             # 本地小模型在处理长提示词时可能输出截断的思考文本：用精简提示词重试一次
@@ -215,35 +245,36 @@ def _analysis_for(detections, inspection_id=None, review_status=None):
         out['latency_ms'] = result.get('latency_ms')
         out['tokens'] = result.get('tokens')
         return out
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         rule['source'] = 'rule_fallback'
-        rule['reason'] = '大模型调用失败，已降级：%s' % str(e)[:180]
+        rule['reason'] = '大模型调用失败，已降级为规则建议，请稍后重试。'
         return rule
 
 
-def _rule_answer(context_type, context_id, question):
+def _rule_answer(context_type, context_id, question, context):
     """规则模板兜底回答（无大模型/失败时使用）。"""
     q = (question or '').strip()
     if context_type == 'batch':
-        summary = storage.batch_summary(context_id)
+        summary = context
         if not summary:
             return '未找到批次记录：%s' % context_id, []
         base = ('批次 %s 共 %d 张，模型框 %d 个，已复核 %d 张；分类统计：%s。' % (
             context_id, summary['image_count'], summary['model_box_count'],
             summary['confirmed_count'], json.dumps(summary['per_class'], ensure_ascii=False)))
         return base, []
-    row, dets = storage.get_inspection(context_id)
-    if not row:
+    if context is None:
         return '未找到检测记录：%s' % context_id, []
-    det_json = [{'class_name': d['class_name'], 'class_cn': CLASSES_CN.get(d['class_name'], d['class_name']),
-                 'confidence': d['score'], 'bbox_xyxy': json.loads(d['bbox_json'])} for d in dets]
-    analysis = _rule_analysis(det_json)
+    detail = context
+    if detail['review_invalid']:
+        return '旧复核数据无效，请重新复核后获取建议。', []
+    det_json = _analysis_detections(detail['reviewed_detections'])
+    analysis = _rule_analysis(det_json, detail['detections'])
     if any(k in q for k in ('原因', '为什么', '怎么造成')):
         return '、'.join(analysis['hypotheses']) or '暂无足够依据判断原因，建议补充工艺与图像信息。', analysis['references']
     if any(k in q for k in ('怎么办', '处理', '复检', '建议')):
         return '复检步骤：' + '；'.join(analysis['recheck_steps']), analysis['references']
-    return ('记录 %s：检出 %d 处缺陷（%s）。%s' % (
-        context_id, len(det_json),
+    return ('记录 %s：原模型框 %d 处，当前复核版本 %d 的有效框 %d 处（%s）。%s' % (
+        context_id, len(detail['detections']), detail['review_version'], len(det_json),
         '、'.join('%s×%d' % (k, sum(1 for d in det_json if d['class_name'] == k))
                  for k in dict.fromkeys(d['class_name'] for d in det_json)) if det_json else '无',
         '；'.join(analysis['facts'][:2])), analysis['references'])
@@ -258,15 +289,16 @@ def _build_chat_context(context_type, context_id):
     if not row:
         return None, None
     detail = _inspection_detail(row, dets)
+    if detail['review_invalid']:
+        raise HTTPException(status_code=409, detail='旧复核数据无效，请重新复核后生成建议')
     return detail, row
 
 
-def _answer_question(context_type, context_id, question):
+def _answer_question(context_type, context_id, question, context):
     """优先 DeepSeek 大模型回答；失败/未配置降级规则模板。返回 (answer, references, source)。"""
-    rule_answer, rule_refs = _rule_answer(context_type, context_id, question)
+    rule_answer, rule_refs = _rule_answer(context_type, context_id, question, context)
     if not llm.available():
         return rule_answer, rule_refs, 'rule_fallback'
-    context, _ = _build_chat_context(context_type, context_id)
     if context is None:
         return rule_answer, rule_refs, 'rule_fallback'
     try:
@@ -279,7 +311,10 @@ def _answer_question(context_type, context_id, question):
                 'image_height': context.get('image_height'),
                 'model_version': context.get('model_version'),
                 'review_status': context.get('review_status'),
+                'review_version': context.get('review_version'),
                 'detections': context.get('detections', [])[:30],
+                'reviewed_detections': context.get('reviewed_detections', [])[:30],
+                'review': context.get('review'),
             }
         else:
             ctx = context
@@ -331,9 +366,13 @@ async def create_inspection(
     ext = os.path.splitext(image.filename or '')[1].lower()
     if ext not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail='仅支持 jpg/jpeg/png/bmp')
-    data = await image.read()
+    data = await image.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail='图片超过 10MB 限制')
+    return await run_in_threadpool(_save_detection, data, ext, batch_no.strip(), workpiece_no)
+
+
+def _save_detection(data, ext, batch_no, workpiece_no):
     img = _decode(data)
     if img is None:
         raise HTTPException(status_code=400, detail='图片无法解码')
@@ -348,16 +387,25 @@ async def create_inspection(
     annotated = _annotated(img, result['defects'])
     img_path = os.path.join(storage.IMAGES_DIR, inspection_id + ext)
     ann_path = os.path.join(storage.IMAGES_DIR, inspection_id + '_pred.jpg')
-    cv2.imwrite(img_path, img)
-    cv2.imwrite(ann_path, annotated)
-
     timing = {'inference_ms': result.get('inference_ms'), 'total_ms': round(total_ms, 2)}
-    storage.insert_inspection(inspection_id, batch_no.strip(), workpiece_no, img_path, ann_path,
-                              result['width'], result['height'], os.path.basename(runtime.pick_weights()),
-                              timing)
-    storage.insert_detections(inspection_id, defects)
-    task_result = {'inspection_id': inspection_id, 'detections': defects, 'timing': timing}
-    storage.insert_task(task_id, 'detection', 'completed', inspection_id, task_result)
+    written_paths = []
+    try:
+        os.makedirs(storage.IMAGES_DIR, exist_ok=True)
+        for path, pixels, suffix in ((img_path, img, ext), (ann_path, annotated, '.jpg')):
+            ok, encoded = cv2.imencode(suffix, pixels)
+            if not ok:
+                raise OSError('图像编码失败')
+            with open(path, 'xb') as f:
+                written_paths.append(path)
+                f.write(encoded.tobytes())
+        storage.save_inspection(inspection_id, batch_no, workpiece_no, img_path, ann_path,
+                                result['width'], result['height'], result['model'], timing,
+                                defects, task_id)
+    except Exception:
+        for path in written_paths:
+            if os.path.isfile(path):
+                os.remove(path)
+        raise HTTPException(status_code=500, detail='保存检测记录失败，请稍后重试') from None
 
     return {
         'inspection_id': inspection_id,
@@ -366,7 +414,7 @@ async def create_inspection(
         'detection_count': len(defects),
         'image_width': result['width'],
         'image_height': result['height'],
-        'model_version': os.path.basename(runtime.pick_weights()),
+        'model_version': result['model'],
         'timing': timing,
     }
 
@@ -413,11 +461,17 @@ def create_analysis(inspection_id: str, req: AnalysisRequest | None = None):
     row, dets = storage.get_inspection(inspection_id)
     if not row:
         raise HTTPException(status_code=404, detail='inspection 不存在')
-    det_json = [{'class_name': d['class_name'], 'class_cn': CLASSES_CN.get(d['class_name'], d['class_name']),
-                 'confidence': d['score'], 'bbox_xyxy': json.loads(d['bbox_json'])} for d in dets]
-    analysis = _analysis_for(det_json, inspection_id, row['review_status'])
+    detail = _inspection_detail(row, dets)
+    if detail['review_invalid']:
+        raise HTTPException(status_code=409, detail='旧复核数据无效，请重新复核后生成建议')
+    analysis = _analysis_for(_analysis_detections(detail['reviewed_detections']), inspection_id,
+                             row['review_status'], detail['detections'])
+    analysis['review_version'] = row['review_version']
+    analysis['created_at'] = storage.now()
     task_id = storage.new_id('TASK')
     storage.add_analysis(inspection_id, analysis)
+    current, _ = storage.get_inspection(inspection_id)
+    analysis['stale'] = current['review_version'] != row['review_version']
     storage.insert_task(task_id, 'analysis', 'completed', inspection_id,
                         {'inspection_id': inspection_id, 'analysis': analysis})
     return {'inspection_id': inspection_id, 'task_id': task_id, 'status': 'completed', 'analysis': analysis}
@@ -433,13 +487,18 @@ class ChatRequest(BaseModel):
 def chat(req: ChatRequest):
     if req.context_type not in ('inspection', 'batch'):
         raise HTTPException(status_code=422, detail='context_type 仅支持 inspection/batch')
-    answer, references, source = _answer_question(req.context_type, req.context_id, req.question)
+    context, _ = _build_chat_context(req.context_type, req.context_id)
+    used_version = context['review_version'] if context and req.context_type == 'inspection' else None
+    answer, references, source = _answer_question(req.context_type, req.context_id, req.question, context)
+    current, _ = storage.get_inspection(req.context_id) if used_version is not None else (None, None)
+    stale = current is not None and current['review_version'] != used_version
     task_id = storage.new_id('TASK')
     storage.add_chat(req.context_type, req.context_id, req.question, answer)
     storage.insert_task(task_id, 'chat', 'completed', req.context_id if req.context_type == 'inspection' else None,
-                        {'answer': answer, 'references': references, 'source': source})
+                        {'answer': answer, 'references': references, 'source': source,
+                         'review_version': used_version, 'stale': stale})
     return {'task_id': task_id, 'status': 'completed', 'answer': answer,
-            'references': references, 'source': source}
+            'references': references, 'source': source, 'review_version': used_version, 'stale': stale}
 
 
 class ReviewRequest(BaseModel):
@@ -447,16 +506,19 @@ class ReviewRequest(BaseModel):
     reviewer: str | None = None
     corrections: list | None = None
     notes: str | None = None
-    base_version: int | None = None
+    base_version: int = Field(ge=0, strict=True)
 
 
 @router.post('/inspections/{inspection_id}/review')
 def review(inspection_id: str, req: ReviewRequest):
     if req.review_status not in ('pending', 'confirmed', 'corrected', 'unresolved'):
         raise HTTPException(status_code=422, detail='review_status 非法')
-    payload = {'corrections': req.corrections or [], 'notes': req.notes}
-    version, err = storage.add_review(inspection_id, req.review_status, req.reviewer,
-                                      payload, req.base_version)
+    payload = {'corrections': req.corrections, 'notes': req.notes}
+    try:
+        version, err = storage.add_review(inspection_id, req.review_status, req.reviewer,
+                                          payload, req.base_version)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
     if err == 'not_found':
         raise HTTPException(status_code=404, detail='inspection 不存在')
     if err == 'version_conflict':
@@ -464,7 +526,7 @@ def review(inspection_id: str, req: ReviewRequest):
     return {'inspection_id': inspection_id, 'review_status': req.review_status, 'review_version': version}
 
 
-@router.get('/batches/{batch_no}/summary')
+@router.get('/batches/{batch_no:path}/summary')
 def batch_summary(batch_no: str):
     summary = storage.batch_summary(batch_no)
     if not summary:
@@ -477,18 +539,22 @@ def get_report(report_or_inspection_id: str):
     rep = storage.get_report(report_or_inspection_id)
     if rep:
         return {'report_id': rep['id'], 'inspection_id': rep['inspection_id'],
-                'format': rep['format'], 'content_md': rep['content'], 'created_at': rep['created_at']}
+                'format': rep['format'], 'content_md': rep['content'], 'created_at': rep['created_at'],
+                'review_version': rep['review_version']}
     row, dets = storage.get_inspection(report_or_inspection_id)
     if not row:
         raise HTTPException(status_code=404, detail='报告/记录不存在')
     detail = _inspection_detail(row, dets)
+    if detail['review_invalid']:
+        raise HTTPException(status_code=409, detail='旧复核数据无效，请重新复核后生成报告')
     lines = ['# 质检报告 %s' % row['inspection_id'], '',
              '- 批次号：%s' % row['batch_no'],
              '- 工件号：%s' % (row['workpiece_no'] or '-'),
              '- 模型版本：%s' % row['model_version'],
              '- 检测时间：%s' % row['created_at'],
-             '- 复核状态：%s' % row['review_status'], '',
-             '## 检测结果', '']
+             '- 复核状态：%s' % row['review_status'],
+             '- 复核版本：%d' % row['review_version'], '',
+             '## 原模型检测结果', '']
     if dets:
         lines.append('| 类别 | 中文 | 置信度 | bbox |')
         lines.append('| --- | --- | --- | --- |')
@@ -497,17 +563,45 @@ def get_report(report_or_inspection_id: str):
                 d['class_name'], CLASSES_CN.get(d['class_name'], ''), d['score'], d['bbox_json']))
     else:
         lines.append('未检出六类目标缺陷（不等同于产品合格判定）。')
+    lines += ['', '## 当前人工复核结果', '']
+    if detail['review']:
+        lines += ['- 复核人：%s' % (detail['review']['reviewer'] or '-'),
+                  '- 备注：%s' % ((detail['review']['payload'] or {}).get('notes') or '-'), '']
+    else:
+        lines.append('尚未提交人工复核，以下保留原模型框。')
+    lines += ['| 类别 | 来源 | 原模型分数 | bbox |', '| --- | --- | --- | --- |']
+    for d in detail['reviewed_detections']:
+        lines.append('| %s | %s | %s | %s |' % (
+            CLASSES_CN.get(d['class_name'], d['class_name']),
+            '人工新增或修改' if d['source'] == 'manual' else '原模型框',
+            '-' if d['score'] is None else '%.4f' % d['score'], d['bbox_xyxy']))
+    if not detail['reviewed_detections']:
+        lines.append('当前复核结果无六类目标缺陷框（不等同于产品合格判定）。')
+    analysis = detail['analysis']
+    if analysis:
+        lines += ['', '## 辅助分析', '', '- 来源：%s' % analysis.get('source', 'unknown'),
+                  '- 依据复核版本：%s' % analysis.get('review_version', '未知'),
+                  '- 分析状态：%s' % ('已过时，请重新生成' if analysis['stale'] else '对应当前复核版本')]
+        for key, label in (('facts', '事实'), ('references', '依据'), ('hypotheses', '参考原因'),
+                           ('recheck_steps', '复检步骤'), ('missing_information', '待补信息')):
+            lines += ['', '### ' + label, ''] + ['- ' + item for item in analysis.get(key, [])]
+    else:
+        lines += ['', '## 辅助分析', '', '尚未生成辅助分析。']
     lines += ['', '## 说明', '',
               '- 模型输出为辅助检测结果，需人工复核确认；', '- 边界框不代表真实缺陷尺寸。']
     content = '\n'.join(lines)
     report_id = storage.new_id('RPT')
-    storage.save_report(report_id, row['inspection_id'], 'md', content)
-    return {'report_id': report_id, 'inspection_id': row['inspection_id'], 'format': 'md',
-            'content_md': content, 'created_at': storage.now()}
+    storage.save_report(report_id, row['inspection_id'], 'md', content, row['review_version'])
+    return get_report(report_id)
 
 
 @ws_router.websocket('/ws/tasks/{task_id}')
 async def ws_task(websocket: WebSocket, task_id: str):
+    try:
+        verify_api_key(websocket.headers.get('x-api-key'))
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     try:
         task = storage.get_task(task_id)

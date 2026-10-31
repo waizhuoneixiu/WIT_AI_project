@@ -79,7 +79,8 @@ def main():
                                               'confirmed_count': 0, 'unresolved_count': 0}
     api_v1.llm.chat_json = lambda *a, **k: {'data': {'answer': '这是大模型回答', 'references': ['数据依据']},
                                             'model': 'deepseek-chat', 'latency_ms': 8.0, 'tokens': {}}
-    answer, refs, source = api_v1._answer_question('batch', 'B-1', '有什么缺陷？')
+    answer, refs, source = api_v1._answer_question('batch', 'B-1', '有什么缺陷？',
+                                                api_v1._build_chat_context('batch', 'B-1')[0])
     check(source == 'deepseek', 'chat source=deepseek')
     check(answer == '这是大模型回答', '使用大模型回答')
     check(refs == ['数据依据'], '使用大模型引用')
@@ -92,7 +93,8 @@ def main():
     out = api_v1._analysis_for(DET, 'INSP-TEST', 'pending')
     check(out.get('source') == 'rule_fallback', 'analysis 异常降级')
     check('降级' in out.get('reason', ''), '降级原因可见')
-    answer, refs, source = api_v1._answer_question('batch', 'B-1', '怎么办？')
+    answer, refs, source = api_v1._answer_question('batch', 'B-1', '怎么办？',
+                                                api_v1._build_chat_context('batch', 'B-1')[0])
     check(source == 'rule_fallback', 'chat 异常降级')
 
     # 恢复真实函数，供第 5 步真实调用

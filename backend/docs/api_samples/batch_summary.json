@@ -1,12 +1,12 @@
 {
-  "batch_no": "SAMPLE-BATCH-001",
+  "batch_no": "FIXTURE-BATCH-001",
   "image_count": 1,
-  "model_box_count": 2,
+  "model_box_count": 1,
   "per_class": {
-    "patches": 2
+    "patches": 1
   },
   "review_stats": {
-    "confirmed": 1
+    "corrected": 1
   },
   "confirmed_count": 1,
   "unresolved_count": 0

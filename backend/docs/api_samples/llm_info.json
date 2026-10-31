@@ -1,13 +1,13 @@
 {
-  "provider": "deepseek",
-  "mode": "deepseek-api",
+  "provider": "none",
+  "mode": "rule-fallback",
   "model": "deepseek-chat",
-  "configured": true,
-  "source": "deepseek",
-  "deepseek_configured": true,
-  "local_model_path": "D:\\Users\\何ch\\source\\repos  AI\\AIvision1\\models\\DeepSeek-R1-Distill-Qwen-1.5B",
-  "local_model_ready": true,
+  "configured": false,
+  "source": "rule_fallback",
+  "deepseek_configured": false,
+  "local_model_path": "models/not-installed",
+  "local_model_ready": false,
   "base_url": "https://api.deepseek.com",
   "timeout_s": 40.0,
-  "available": true
+  "available": false
 }

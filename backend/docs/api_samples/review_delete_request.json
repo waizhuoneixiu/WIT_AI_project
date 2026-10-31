@@ -1,0 +1,23 @@
+{
+  "review_status": "corrected",
+  "reviewer": "sample-operator",
+  "notes": "示例：删除原框，保留上次人工新增框",
+  "base_version": 1,
+  "corrections": [
+    {
+      "op": "delete",
+      "detection_id": "DET-20261030220326-D2615D"
+    },
+    {
+      "op": "add",
+      "detection_id": "e41c00b2-0ac6-4fd3-9932-6931b4d978ab",
+      "class_id": 5,
+      "bbox_xyxy": [
+        150.0,
+        20.0,
+        180.0,
+        160.0
+      ]
+    }
+  ]
+}

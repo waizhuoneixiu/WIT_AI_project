@@ -4,16 +4,17 @@
   "page_size": 20,
   "items": [
     {
-      "inspection_id": "INSP-20261030173736-6DC741",
-      "batch_no": "SAMPLE-BATCH-001",
+      "inspection_id": "INSP-20261030220326-1AD8DB",
+      "batch_no": "FIXTURE-BATCH-001",
       "workpiece_no": "SAMPLE-W1",
       "image_width": 200,
       "image_height": 200,
-      "model_version": "best.pt",
+      "model_version": "fixture-not-yolo",
       "review_status": "pending",
-      "created_at": "2026-10-30T17:37:42",
-      "annotated_url": "/files/INSP-20261030173736-6DC741_pred.jpg",
-      "detection_count": 2,
+      "review_version": 0,
+      "created_at": "2026-10-30T22:03:26",
+      "annotated_url": "/files/INSP-20261030220326-1AD8DB_pred.jpg",
+      "detection_count": 1,
       "classes": [
         "patches"
       ]

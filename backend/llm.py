@@ -2,8 +2,8 @@
 """大模型客户端：DeepSeek API / 本地 DeepSeek-R1（transformers）/ 自动降级。
 
 选择规则（LLM_PROVIDER）：
-    auto（默认）: 有 DEEPSEEK_API_KEY -> deepseek；否则若本地模型存在 -> local
-    deepseek    : 强制 DeepSeek 云 API（需要 Key）
+    auto       : 有 DEEPSEEK_API_KEY -> deepseek；否则若本地模型存在 -> local
+    deepseek（默认）: DeepSeek 云 API（需要 Key）
     local       : 强制本地 transformers 模型（无需 Key，离线可用）
 
 未配置/失败时由上层（api_v1）自动降级到规则模板。
@@ -21,7 +21,7 @@ config.load_dotenv_if_present()
 
 DEV = os.path.dirname(os.path.abspath(__file__))
 
-LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'auto').strip().lower() or 'auto'
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', config.LLM_PROVIDER).strip().lower() or 'deepseek'
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 DEEPSEEK_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')

@@ -1,0 +1,18 @@
+{
+  "task_id": "TASK-20261030220327-33B9CB",
+  "type": "chat",
+  "status": "completed",
+  "inspection_id": "INSP-20261030220326-1AD8DB",
+  "created_at": "2026-10-30T22:03:27",
+  "updated_at": "2026-10-30T22:03:27",
+  "error": null,
+  "result": {
+    "answer": "复检步骤：划伤：复核划痕深度与长度；划伤：检查辊道与吊运接触点；划伤：确认是否影响外售等级",
+    "references": [
+      "划伤：划痕，线状、方向性强，通常长度明显大于宽度。"
+    ],
+    "source": "rule_fallback",
+    "review_version": 2,
+    "stale": false
+  }
+}

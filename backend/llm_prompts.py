@@ -6,6 +6,7 @@ ANALYSIS_SYSTEM = (
     '你是热轧带钢表面质检领域的资深工程师，负责对 YOLO 检测结果做辅助分析。'
     '你只能依据给定的检测结果与知识条目进行解释，不得编造未提供的工艺参数、设备故障或根因。'
     '检测结果只代表模型在图像上发现的目标，不代表产品合格/不合格结论；最终判定需人工复核。'
+    '区分原模型预测和当前人工复核结果；人工新增或修改的框没有模型置信度，不得编造分数。'
     '请用中文输出严格 JSON（不要输出 Markdown 代码块），字段：'
     'facts（检测事实，字符串数组）、references（知识依据，字符串数组）、'
     'hypotheses（参考原因，必须用"可能/建议核实"等措辞，字符串数组）、'
@@ -16,6 +17,8 @@ CHAT_SYSTEM = (
     '你是热轧带钢表面质检助手，围绕当前检测记录或批次回答用户问题。'
     '只能使用给定的检测记录、批次统计和知识条目作答，不编造原因、规则或数据；'
     '不确定时明确说明缺少哪些信息，并建议人工复核。'
+    'detections 是原模型预测，reviewed_detections 是当前有效复核结果；二者不同需明确说明。'
+    '批次 model_box_count/per_class 只统计原模型框，不代表人工修正后的统计。'
     '请用中文输出严格 JSON（不要输出 Markdown 代码块），字段：'
     'answer（回答文本，字符串）、references（参考的知识/数据依据，字符串数组）。'
 )
@@ -36,25 +39,33 @@ def build_analysis_compact_prompt(detections, inspection_id=None):
         lines.append('未检出六类目标缺陷。')
     else:
         for i, d in enumerate(detections, 1):
-            lines.append('%d. class_id=%s %s(%s) 置信度=%.4f bbox=%s' % (
+            lines.append('%d. class_id=%s %s(%s) %s bbox=%s' % (
                 i, d.get('class_id'), d.get('class_name'), d.get('class_cn', ''),
-                float(d.get('confidence', d.get('score', 0))), d.get('bbox_xyxy')))
+                _score_text(d), d.get('bbox_xyxy')))
     lines += ['', '请只输出 JSON：',
               '{"facts":["..."],"references":["..."],"hypotheses":["..."],'
               '"recheck_steps":["..."],"missing_information":["..."]}']
     return '\n'.join(lines)
 
 
-def build_analysis_user_prompt(detections, inspection_id=None, review_status=None):
+def _score_text(detection):
+    score = detection.get('confidence', detection.get('score'))
+    return '人工修正（无模型分数）' if score is None else '模型分数=%.4f' % score
+
+
+def build_analysis_user_prompt(detections, inspection_id=None, review_status=None, original_detections=None):
     lines = ['当前检测记录：%s' % (inspection_id or '(未提供)'),
-             '复核状态：%s' % (review_status or 'pending'), '', '检测结果（class_id 为团队契约编号）：']
+             '复核状态：%s' % (review_status or 'pending'), '', '当前有效结果（class_id 为团队契约编号）：']
     if not detections:
-        lines.append('未检出六类目标缺陷。')
+        lines.append('当前复核结果无缺陷框，原模型结果另存。' if original_detections else '未检出六类目标缺陷。')
     else:
         for i, d in enumerate(detections, 1):
-            lines.append('%d. class_id=%s, 名称=%s(%s), 置信度=%.4f, bbox_xyxy=%s' % (
+            lines.append('%d. class_id=%s, 名称=%s(%s), %s, bbox_xyxy=%s' % (
                 i, d.get('class_id'), d.get('class_name'), d.get('class_cn', ''),
-                float(d.get('confidence', d.get('score', 0))), d.get('bbox_xyxy')))
+                _score_text(d), d.get('bbox_xyxy')))
+    if original_detections is not None:
+        lines += ['', '原模型预测（保留证据，不覆盖当前人工结果）：',
+                  json.dumps(original_detections, ensure_ascii=False)]
     lines += ['', '可用知识条目（若与缺陷类别匹配才引用；不匹配不要引用）：', _knowledge_text(detections),
               '', '请输出 JSON。']
     return '\n'.join(lines)

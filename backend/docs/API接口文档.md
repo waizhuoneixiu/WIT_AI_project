@@ -1,414 +1,129 @@
-# SteelScan 缺陷检测后端 API 接口文档
+# SteelScan 业务 API 对接说明
 
-| 文档信息 | 内容 |
-| --- | --- |
-| 版本 | v1.3.0 |
-| 生成日期 | 2026-10-30 |
-| 服务 | SteelScan 热轧带钢表面缺陷检测 API |
-| 模型 | **YOLO26n @ imgsz=640**（ultralytics **8.4.193**，PyTorch 2.14.1+cu130） |
-| 规范文件 | `docs/openapi.json`（OpenAPI 3.1，可导入 Postman/Swagger/自动生成客户端） |
-| 在线调试 | 启动服务后打开 `http://127.0.0.1:8000/docs` |
+更新日期：2026年10月30日。后端现有基础接口已实现；**本轮云适配、完整框复核和详情/报告新增字段按[共同契约](../../docs/plans/04-shared-contract.md)实施，已落地代码并通过本轮fixture业务流程，真实云与Android仍须分别验收。** 本文不是新增功能已上线的证明。
 
-> 本文档只描述后端接口；前端/第三方按本文档对接即可。
+## 1. 连接与运行
 
----
+Android 使用本机轻量 FastAPI 业务地址 `http://<电脑局域网IP>:8000`；模拟器访问宿主通常使用 `http://10.0.2.2:8000`。具体启动和依赖以[后端README](../README.md)为准。不要使用其他开发者的绝对路径或虚构 Conda 环境。
 
-## 1. 启动服务
+业务 API 调用魔搭云推理，并在本机 SQLite 保存原图、结果与复核；魔搭本身只提供 Gradio 检测，不承载 `/api/inspections` 等业务接口。本轮不安装本地 YOLO、PyTorch、ONNX Runtime 或本地大模型依赖。
 
-```powershell
-conda activate AIvision
-cd "D:\Users\何ch\source\repos  AI\AIvision1"
-python server.py --port 8000          # 默认 0.0.0.0:8000
-# 可选：--host 127.0.0.1  --reload
-```
+| 后端配置 | 本轮默认/用途 |
+|---|---|
+| `DETECTOR_PROVIDER` | `modelscope` |
+| `MODELSCOPE_BASE_URL` | `https://studio-waizhuoneixiu-steelscan-demo.api-inference.modelscope.net` |
+| `MODELSCOPE_API_TOKEN` | 魔搭访问令牌，仅后端私有配置 |
+| `MODELSCOPE_TIMEOUT` | 60秒云调用预算；各阶段用剩余预算设置连接/读取超时，底层阻塞可能延至当前网络超时，并非强制取消硬截止 |
+| `LLM_PROVIDER` | `deepseek`；无Key或失败返回规则模板 |
+| `DEEPSEEK_API_KEY` | DeepSeek令牌，仅后端私有配置 |
+| `STEELSCAN_API_KEY` | 可选业务访问Key，客户端通过 `X-API-Key` 发送 |
+| `STEELSCAN_STORAGE_DIR` / `STEELSCAN_DB` | 本机图片/SQLite位置 |
 
-- Base URL：`http://<服务器IP>:8000`
-- 首次请求会加载模型（约 2~4 秒），之后常驻显存；服务启动时已做 warmup。
+开启业务鉴权时 `/api*`、`/detect*`、`/model/info` 以及本轮补齐保护的 `/files/*` 都带 `X-API-Key`。`/health`、`/classes` 可用于连接诊断。图片加载与报告请求同样使用业务Key；云令牌不能进入App、URL、日志或公开示例。
 
-## 1.1 鉴权（可选，公网部署强烈建议开启）
+## 2. 模型、类别与坐标
 
-服务端环境变量 `STEELSCAN_API_KEY` 为空时**不鉴权**（仅本机/内网调试）；设置后，以下接口需要请求头：
+当前模型 **YOLO26n@640**，训练框架 Ultralytics 8.4.193；魔搭运行 `best.onnx`，业务响应模型标识本轮固定为 `yolo26n-640-onnx`。输入尺寸固定640、默认conf=0.25；本地GPU基准不是云端请求时延。
 
-```
-X-API-Key: <你设置的 Key>
-```
+| class_id | class_name | 中文 |
+|---:|---|---|
+| 0 | crazing | 龟裂 / 网状裂纹 |
+| 1 | inclusion | 夹杂 |
+| 2 | patches | 斑块 |
+| 3 | pitted_surface | 麻点表面 |
+| 4 | rolled-in_scale | 轧入氧化皮 |
+| 5 | scratches | 划痕 |
 
-| 接口 | 是否需要 Key |
-| --- | --- |
-| `/health`、`/classes`、`/docs` | 否 |
-| `/model/info`、`/detect`、`/detect/batch`、`/detect/base64` | **是** |
+原训练类别顺序不同，后端已映射；包括低层 `/detect` 在内的对外结果都使用上表，不再映射一次。`bbox_xyxy` 是统一方向后原图像素坐标，不是640画布坐标或毫米尺寸。零框显示“未检出六类目标缺陷”，不表示合格。
 
-- 未带或错误 Key → `401 {"detail": "无效或缺失 API Key（请求头 X-API-Key）"}`
-- 可通过 `GET /health` 的 `auth_required` 字段判断服务端是否开启鉴权。
-- 设置方式：`$env:STEELSCAN_API_KEY="your-key"`（PowerShell）/ `export STEELSCAN_API_KEY=...`（Linux）/ Docker 环境变量。
+## 3. Android 主流程
 
-## 1.2 大模型配置（DeepSeek 云 API / 本地模型）
+| 方法与路径 | 请求/响应要点 |
+|---|---|
+| `POST /api/inspections` | multipart `image`、必填非空 `batch_no`、可选 `workpiece_no`；201返回 inspection_id/task_id/status=completed |
+| `GET /api/inspections` | batch_no/class_id/review_status/page/page_size；返回total/page/page_size/items，total按相同条件过滤 |
+| `GET /api/inspections/{id}` | 原预测、有效复核框、图像URL、复核版本及最新分析 |
+| `GET /api/tasks/{task_id}` | 已返回编号的任务最终状态/结果 |
+| `POST /api/inspections/{id}/analysis` | 可选note；同步返回analysis/task_id/status |
+| `POST /api/chat/messages` | context_type=inspection/batch、context_id、question；同步返回answer/references/source/task_id/review_version/stale |
+| `POST /api/inspections/{id}/review` | review_status、reviewer、notes、必填base_version、完整corrections；成功返回新review_version |
+| `GET /api/batches/{batch_no}/summary` | 图片、原模型框、原预测类别和图片复核状态统计 |
+| `GET /api/reports/{inspection_id或report_id}` | format=md、content_md、report_id、inspection_id、review_version、created_at |
+| `GET /api/class-map`、`GET /api/llm/info` | 类别映射、分析服务来源和状态 |
 
-支持两种大模型来源，`LLM_PROVIDER` 控制：`auto`（默认）→ 有 `DEEPSEEK_API_KEY` 用云 API，否则本地模型存在用本地，否则规则模板；`deepseek` / `local` 可强制指定。
+批次号允许含斜杠；汇总路径中的完整值需URL编码，例如 `BATCH/2026-001` 请求 `/api/batches/BATCH%2F2026-001/summary`。服务端使用 `{batch_no:path}`，但OpenAPI路径仍显示 `{batch_no}`；历史筛选和chat context_id使用相同完整批次号。
 
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key；留空则用本地模型或规则模板 |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容接口地址 |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
-| `LLM_PROVIDER` | `auto` | `auto` / `deepseek` / `local` |
-| `LOCAL_LLM_MODEL` | `models/DeepSeek-R1-Distill-Qwen-1.5B` | 本地模型目录（`python scripts/download_local_llm.py` 下载） |
-| `LOCAL_LLM_DEVICE` | `cuda` | `cuda` / `cpu` |
-| `LOCAL_LLM_MAX_NEW_TOKENS` | 700 | 本地模型最大生成长度 |
-| `LLM_TIMEOUT` / `LLM_MAX_RETRIES` | 40 / 2 | 云 API 超时秒数 / 重试次数 |
-
-- 返回结果中的 `source` 字段：`deepseek`=DeepSeek 云 API，`local-deepseek`=本地 DeepSeek-R1 蒸馏模型，`rule_fallback`=离线规则模板（未配置/超时/失败自动降级，附 `reason`）。
-- `GET /api/llm/info` 可查看当前 provider/mode/model/source（不返回 Key）。
-- 大模型只做**辅助解释与建议**，不替代检测、不编造原因；最终判定需人工复核。
-
----
-
-## 2. 模型与类别
-
-| 项 | 值 |
-| --- | --- |
-| 模型 | YOLO26n（Ultralytics YOLO26 系列，COCO 预训练迁移） |
-| 框架 | ultralytics 8.4.193 / PyTorch 2.14.1+cu130 |
-| 输入尺寸 | 640×640（内部自动 letterbox） |
-| 参数量 / 计算量 | 2.39M / 5.4 GFLOPs |
-| 权重文件 | `models/best.pt`（5.25MB）、`models/best.onnx`（9.36MB） |
-| 默认阈值 | conf=0.25，iou=0.45 |
-| 设备 | GPU（RTX 5060 Laptop 8GB）；可在 `config.py` 改 `DEFAULT_DEVICE='cpu'` |
-
-**类别表（对外 API 统一契约 class_id，见 04-shared-contract）**：
-
-| id | name | 中文 | 说明 |
-| --- | --- | --- | --- |
-| 0 | crazing | 龟裂 / 网状裂纹 | 细网状裂纹（当前弱项） |
-| 1 | inclusion | 夹杂 | 非金属夹杂 |
-| 2 | patches | 斑块 | 表面斑块/色差 |
-| 3 | pitted_surface | 麻点表面 | 点状凹坑 |
-| 4 | rolled-in_scale | 轧入氧化皮 | 轧制氧化皮压入 |
-| 5 | scratches | 划痕 | 线状划伤 |
-
-> 模型训练原始顺序为 `rolled-in_scale, patches, crazing, pitted_surface, inclusion, scratches`（见 `/api/class-map`），
-> 后端输出时已统一转换为上表契约 class_id，App/报告请按上表处理。
-
----
-
-## 3. 接口总览
-
-| 序号 | 方法 | 路径 | 功能 | Content-Type |
-| --- | --- | --- | --- | --- |
-| 1 | GET | `/health` | 健康检查 | — |
-| 2 | GET | `/model/info` | 当前模型信息 | — |
-| 3 | GET | `/classes` | 类别列表 | — |
-| 4 | POST | `/detect` | 单图检测 | multipart/form-data |
-| 5 | POST | `/detect/batch` | 批量检测 | multipart/form-data |
-| 6 | POST | `/detect/base64` | Base64 检测 | application/json |
-
----
-
-## 4. 接口详情
-
-### 4.1 GET /health
-
-健康检查，可用于探活/负载均衡。
-
-**响应示例**
-```json
-{"status": "ok", "service": "steelscan-defect-api", "version": "1.1.0", "model_loaded": true, "auth_required": true}
-```
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| status | string | 固定 `ok` |
-| service | string | 服务名 |
-| version | string | 服务版本 |
-| model_loaded | bool | 模型是否已加载（首次调用 `/model/info` 或 `/detect` 后为 true） |
-| auth_required | bool | 服务端是否启用了 API Key 鉴权 |
-
----
-
-### 4.2 GET /model/info
-
-返回当前生效权重与推理配置。
-
-**响应示例**
-```json
-{
-  "weights": "D:\\Users\\何ch\\source\\repos  AI\\AIvision1\\runs\\n640\\weights\\best.pt",
-  "weights_file": "best.pt",
-  "imgsz": 640,
-  "conf_threshold": 0.25,
-  "iou_threshold": 0.45,
-  "device": "0",
-  "classes": {"0": "rolled-in_scale", "1": "patches", "2": "crazing",
-              "3": "pitted_surface", "4": "inclusion", "5": "scratches"},
-  "weights_size_mb": 5.5
-}
-```
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| weights | string | 权重绝对路径（选择优先级：`runs/*/weights/best.pt` 最新 → `config.BEST_WEIGHTS` → COCO 预训练） |
-| weights_file | string | 权重文件名 |
-| imgsz | int | 推理输入尺寸（默认 640） |
-| conf_threshold | float | 默认置信度阈值 |
-| iou_threshold | float | 默认 NMS IoU 阈值 |
-| device | string | `"0"`=GPU0，`"cpu"`=CPU |
-| classes | object | id → 英文类别名 |
-| weights_size_mb | float | 权重大小（MB） |
-
----
-
-### 4.3 GET /classes
-
-**响应示例**
-```json
-{
-  "classes": [
-    {"id": 0, "name": "rolled-in_scale", "name_cn": "氧化铁皮压入"},
-    {"id": 1, "name": "patches", "name_cn": "斑块"},
-    {"id": 2, "name": "crazing", "name_cn": "龟裂"},
-    {"id": 3, "name": "pitted_surface", "name_cn": "麻点/凹坑"},
-    {"id": 4, "name": "inclusion", "name_cn": "夹杂"},
-    {"id": 5, "name": "scratches", "name_cn": "划伤"}
-  ]
-}
-```
-
----
-
-### 4.4 POST /detect（单图检测）
-
-**请求**：`multipart/form-data`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| image | file | 是 | 图片文件，支持 jpg/jpeg/png/bmp |
-
-**响应（200）**
-```json
-{
-  "image": "<array>",
-  "width": 200,
-  "height": 200,
-  "defect_count": 2,
-  "defects": [
-    {
-      "class_id": 1,
-      "class_name": "patches",
-      "class_cn": "斑块",
-      "confidence": 0.8832,
-      "bbox_xyxy": [62.23, 68.4, 136.18, 160.79],
-      "area_ratio": 0.1708,
-      "width": 73.95,
-      "height": 92.39
-    }
-  ],
-  "inference_ms": 11.15,
-  "model": "best.pt",
-  "imgsz": 640,
-  "filename": "patches_110.jpg",
-  "elapsed_ms": 11.75
-}
-```
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| image | string | 传路径时为文件名；直接传数组/文件流时为 `"<array>"` |
-| width / height | int | 原图宽高（像素） |
-| defect_count | int | 检出缺陷数（按 conf 过滤后） |
-| defects[] | array | 缺陷列表，按 confidence 降序 |
-| defects[].class_id | int | 类别 id（见类别表） |
-| defects[].class_name | string | 英文类别名 |
-| defects[].class_cn | string | 中文类别名 |
-| defects[].confidence | float | 置信度 0~1 |
-| defects[].bbox_xyxy | float[4] | 检测框左上/右下坐标（像素，原图坐标系） |
-| defects[].area_ratio | float | 框面积 / 图片面积 |
-| defects[].width / height | float | 框宽高（像素） |
-| inference_ms | float | 模型推理耗时（ms，不含网络/解码） |
-| model | string | 权重文件名 |
-| imgsz | int | 本次推理输入尺寸 |
-| filename | string | 上传文件名 |
-| elapsed_ms | float | 服务端处理总耗时（ms） |
-
-**curl 示例**
-```bash
-curl -X POST http://127.0.0.1:8000/detect \
-  -F "image=@data/neu_det/images/test/patches_110.jpg"
-```
-
-**PowerShell 示例**
-```powershell
-curl.exe -s -X POST http://127.0.0.1:8000/detect -F "image=@data/neu_det/images/test/patches_110.jpg"
-```
-
----
-
-### 4.5 POST /detect/batch（批量检测）
-
-**请求**：`multipart/form-data`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| images | file[] | 是 | 多张图片（同名字段可重复） |
-
-**响应（200）**
-```json
-{
-  "count": 2,
-  "elapsed_ms": 34.2,
-  "results": [
-    { "...": "同 /detect 响应，单张一张" },
-    { "...": "同 /detect 响应，单张一张" }
-  ]
-}
-```
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| count | int | 成功处理图片数 |
-| elapsed_ms | float | 批处理总耗时（ms） |
-| results | array | 每张图的结果（结构同 `/detect`） |
-
-**curl 示例**
-```bash
-curl -X POST http://127.0.0.1:8000/detect/batch \
-  -F "images=@a.jpg" -F "images=@b.jpg"
-```
-
----
-
-### 4.6 POST /detect/base64（Base64 检测）
-
-**请求**：`application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| image_base64 | string | 是 | 图片 base64；可带 `data:image/jpeg;base64,` 前缀 |
-| filename | string | 否 | 文件名，默认 `base64_image.jpg` |
-| conf | float | 否 | 覆盖默认置信度阈值 |
-| imgsz | int | 否 | 覆盖默认输入尺寸 |
-
-**请求示例**
-```json
-{
-  "image_base64": "/9j/4AAQSkZJRgABAQ...",
-  "filename": "test.jpg",
-  "conf": 0.15
-}
-```
-
-**响应**：同 `/detect`。
-
----
-
-## 4.10 团队共同接口 `/api`（按 docs/plans/04-shared-contract.md 实现）
-
-App 主流程使用这组接口；`/detect` 仅用于快速联调。所有 `/api` 接口在开启鉴权时同样需要 `X-API-Key`。
-`analysis` / `chat` 接口返回中的 `source` 标识分析来源（`deepseek` 或 `rule_fallback`），未配置 DeepSeek Key 时自动降级。
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | `/api/inspections` | 上传图片+批次号（form: image, batch_no, workpiece_no），检测并落库 |
-| GET | `/api/inspections` | 历史查询（batch_no/class_id/review_status/page/page_size） |
-| GET | `/api/inspections/{inspection_id}` | 检测详情（原图坐标框、timing、复核、标注图 URL） |
-| GET | `/api/tasks/{task_id}` | 任务状态与结果（断线恢复） |
-| POST | `/api/inspections/{inspection_id}/analysis` | 生成复检建议（facts/references/hypotheses/recheck_steps/missing_information） |
-| POST | `/api/chat/messages` | 追问（context_type=inspection/batch, context_id, question） |
-| POST | `/api/inspections/{inspection_id}/review` | 人工复核（review_status/reviewer/corrections/notes/base_version，版本冲突返回 409） |
-| GET | `/api/batches/{batch_no}/summary` | 批次真实统计（图片数/模型框数/分类/复核状态） |
-| GET | `/api/reports/{report_id 或 inspection_id}` | 报告（Markdown） |
-| WS | `/ws/tasks/{task_id}` | 任务事件（accepted/completed） |
-| GET | `/api/class-map` | 原始训练类别 → 契约类别映射 |
-| GET | `/api/llm/info` | 大模型配置状态（provider/model/是否已配置，不返回 Key） |
-
-**POST /api/inspections 示例**
+这些接口同步等待完成，不返回真实进度流。已有 `/ws/tasks/{task_id}` 在accept前校验X-API-Key，开启业务鉴权时缺失/错误Key以1008关闭；正确Key仅回放 accepted/completed，App无需连接；不依赖不存在的 progress/analysis_chunk。
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/inspections \
-  -H "X-API-Key: 你的KEY" \
-  -F "batch_no=BATCH-20261030-01" \
-  -F "workpiece_no=W-0001" \
-  -F "image=@test.jpg"
+  -H "X-API-Key: <业务KEY>" \
+  -F "batch_no=BATCH-001" -F "workpiece_no=W-001" -F "image=@test.jpg"
 ```
 
-响应（201）：
-```json
-{"inspection_id": "INSP-...", "task_id": "TASK-...", "status": "completed",
- "detection_count": 2, "image_width": 200, "image_height": 200,
- "model_version": "best.pt", "timing": {"inference_ms": 12.3, "total_ms": 15.8}}
-```
+成功上传后保存inspection_id，查询详情绘图。上传响应丢失且没有编号时不盲目自动重发，先查询历史或用户明确重试，避免重复记录。
 
-**GET /api/inspections/{id} 关键字段**
+### 详情新增字段（本轮补齐）
 
-```json
-{"inspection_id": "...", "batch_no": "...", "image_width": 200, "image_height": 200,
- "model_version": "best.pt",
- "detections": [{"detection_id": "DET-...", "class_id": 2, "class_name": "patches",
-                 "score": 0.8832, "bbox_xyxy": [62.2, 68.4, 136.2, 160.8]}],
- "timing": {"inference_ms": 12.3, "total_ms": 15.8},
- "review_status": "pending", "review": null,
- "annotated_url": "/files/INSP-..._pred.jpg"}
-```
+`detections` 是不可变原预测，每项包含detection_id/class_id/class_name/score/bbox_xyxy；现有尺寸、批次、timing、annotated_url、created_at等字段保留。
 
-> 数据库默认位于 `storage/steelscan.db`，图片/标注图在 `storage/images/`，可通过 `/files/<文件名>` 访问；
-> 环境变量 `STEELSCAN_STORAGE_DIR` / `STEELSCAN_DB` 可覆盖路径。
+| 字段 | 语义 |
+|---|---|
+| `original_url` | 统一方向后原图地址，与image_width/image_height一致 |
+| `review_version` | 当前复核版本，初始0 |
+| `review_invalid` | 历史非法复核返回true并回退原预测；分析/报告409，重新合法复核后恢复 |
+| `reviewed_detections` | 原预测应用最近完整差异后的有效框 |
+| `reviewed_detections[].source` | model/manual；新增或修改为manual且score=null |
+| `analysis` | 最新分析对象或null，含review_version/stale/created_at及分析内容 |
 
----
+复核状态为pending/confirmed/corrected/unresolved。分析内容包含facts/references/hypotheses/recheck_steps/missing_information，source区分deepseek或rule_fallback（历史local-deepseek可读取）。复核版本变化后旧分析stale=true；前端允许重新生成，不能把它标为当前结果。
 
-## 5. 错误码
+### 完整复核差异（本轮补齐）
 
-| HTTP 状态码 | 场景 | 响应示例 |
-| --- | --- | --- |
-| 200 | 成功 | 见上文 |
-| 401 | 未带/错误 API Key（服务端已开启鉴权） | `{"detail": "无效或缺失 API Key（请求头 X-API-Key）"}` |
-| 400 | 图片无法解码 / base64 解析失败 | `{"detail": "无法解码图片（请上传 jpg/png/bmp）"}` |
-| 404 | 路径不存在 | `{"detail": "Not Found"}` |
-| 422 | 请求参数校验失败（缺字段/类型错误） | `{"detail": [{"loc": ["body", "image_base64"], "msg": "field required"}]}` |
-| 500 | 模型加载失败（权重缺失/显存不足） | 服务日志可见，响应 500 |
+`base_version` 必填非负整数，必须等于当前review_version；不匹配返回409。每次发送相对**原始detections**的完整差异，详细校验和样例见[共同契约第4节](../../docs/plans/04-shared-contract.md#4-完整框编辑与复核请求本轮补齐)。
 
----
+- add：新UUID detection_id、class_id、bbox_xyxy。
+- update：原预测detection_id、class_id、bbox_xyxy。
+- delete：原预测detection_id。
+- 坐标为有限数、在图内且面积大于0，类别0–5，ID不能重复或引用其他记录。
+- 再次编辑人工框修改add；删除人工框移除add；恢复原框移除对应update/delete。
+- 兼容旧无op条目为update；corrections省略/null保留最近差异，`[]`恢复原预测。新App总是发送完整列表。
 
-## 6. 性能与阈值建议
+409后保留草稿供比较并刷新详情，由人工重新确认；不要跳过版本号强制覆盖。
 
-**时延基准**（RTX 5060 Laptop 8GB，100 张测试图，n640）：
+聊天回答及其任务result附带实际用于回答的review_version；图片上下文为整数，批次上下文为null。若回答生成期间图片已被复核，stale=true；前端应提示依据已过时，不把旧版本回答标为最新。
 
-| 设备 | 平均 | P50 | P95 | 估算 FPS |
-| --- | --- | --- | --- | --- |
-| GPU（CUDA） | 11.57 ms | 11.64 ms | 14.11 ms | 86.4 |
-| CPU | 23.86 ms | 23.65 ms | 26.57 ms | 41.9 |
+### 统计与报告
 
-> 端到端 `/detect` HTTP 时延 ≈ 模型时延 + 图片解码/网络开销（实测热身后 11~13ms）。
+`image_count`为图片数，`model_box_count`和`per_class`为原模型预测，`confirmed_count`为confirmed+corrected图片数；不把它们当作人工确认框数量或产线合格率。
 
-**业务阈值**（n640，test 集，F1 最大在 conf=0.35）：
+以inspection_id获取当前版本Markdown；以已有report_id获取其保存版本。报告区分原预测、有效复核、备注、review_version和分析来源/过时状态。Android保存`.md`或系统分享，不另造PDF/Excel导出。
 
-| conf | Precision | Recall | F1 |
-| --- | --- | --- | --- |
-| 0.10 | 0.505 | 0.828 | 0.627 |
-| 0.20 | 0.662 | 0.752 | 0.705 |
-| **0.35** | **0.810** | **0.669** | **0.733** |
-| 0.50 | 0.879 | 0.570 | 0.692 |
+## 4. 保留的低层检测接口
 
-- 工业场景更怕漏检：建议 NG 判定阈值用 **0.10~0.15**（Recall≈0.83），NG 结果再人工复判；
-- 追求准确率/减少过杀：用 **0.35~0.50**；
-- `/detect/base64` 支持每次请求传 `conf` 覆盖，`/detect` 可通过修改 `config.DEFAULT_CONF` 统一调整。
+| 接口 | 用途 |
+|---|---|
+| `GET /health` | 业务服务状态与配置；成功不证明云推理实时可用 |
+| `GET /classes` | 契约类别列表 |
+| `GET /model/info` | 检测provider、模型和640输入信息，不泄露本机私有路径 |
+| `POST /detect` | multipart image，返回width/height/defect_count/defects/inference_ms/model/imgsz等 |
+| `POST /detect/batch` | multipart images，多图顺序处理；不是首期App主流程 |
+| `POST /detect/base64` | image_base64、可选filename/conf/imgsz；云模式imgsz非640返回422 |
 
----
+低层结果使用confidence，业务详情转换为score；不要混用两种DTO。上传仅jpg/jpeg/png/bmp、非空、单图≤10MB，必须可解码。低层接口不提供业务复核与历史闭环，正式App使用`/api/inspections`。
 
-## 7. 备注
+## 5. 错误与验证
 
-1. 支持格式：jpg / jpeg / png / bmp（OpenCV 可解码的格式均可）。
-2. 图片建议：单张 ≤ 10MB；超大图会先 letterbox 到 imgsz=640 再推理，小目标建议提高 `imgsz` 或裁剪后检测。
-3. 模型权重选择优先级：`runs/*/weights/best.pt` 中 mtime 最新 → `config.BEST_WEIGHTS` → `models/yolo26n.pt` 预训练；重训后重启服务即可自动生效。
-4. 部署到 CPU 服务器：修改 `config.py` 的 `DEFAULT_DEVICE = 'cpu'`，或安装 onnxruntime 使用 `models/best.onnx`。
-5. 数据集：NEU-DET（东北大学表面缺陷数据库，学术使用请引用 Song & Yan 2013 / He et al. 2020）。
-6. 框架许可：ultralytics 为 AGPL-3.0，比赛演示使用无碍；若商业部署需评估授权。
+| 状态 | 处理 |
+|---|---|
+| 400/422 | 图片或字段错误，修正后再提交 |
+| 401 | 业务Key错误；云令牌错误由后端处理，不索要给App |
+| 404 | 记录/报告不存在，返回列表刷新 |
+| 409 | 复核版本冲突，刷新并人工重新确认 |
+| 503 | 云配置或魔搭鉴权问题，由后端修正配置 |
+| 502 | 上游网络或无效响应，显示失败与重试 |
+| 504 | 云调用超时，先查历史；不能用空框表示失败 |
 
----
+错误信息只说明处理方式，不返回云凭据。验证清单见[联调验收](../../docs/plans/05-integration-acceptance.md)。[当前样例](api_samples/README.md)已用明确fixture模式导出，[OpenAPI](openapi.json)已更新；本轮合成验证见联调验收，既有[验收记录](验收记录.md)不代表Android或新云路径已经通过。
 
-## 8. 变更记录
-
-| 版本 | 日期 | 说明 |
-| --- | --- | --- |
-| v1.3.0 | 2026-10-30 | 接入 DeepSeek 大模型（analysis/chat 返回 source=deepseek/rule_fallback，失败自动降级）；新增 `/api/llm/info` |
-| v1.2.0 | 2026-10-30 | 新增团队共同接口 `/api`（inspections/tasks/review/summary/reports/chat/analysis/WS/class-map）、SQLite 持久化；类别按 04-shared-contract 统一映射 |
-| v1.1.0 | 2026-10-30 | 新增 API Key 鉴权（`X-API-Key`，`STEELSCAN_API_KEY` 开启）；`/health` 增加 `auth_required` |
-| v1.0.0 | 2026-10-30 | 首个后端版本；YOLO26n@640；6 个接口；GPU 11.6ms / CPU 23.9ms |
+模型离线指标见[模型卡](模型卡_n640.md)，云部署记录见[魔搭部署记录](魔搭部署记录.md)。默认阈值保持0.25；不同阈值实验不能直接转为自动合格/判废规则，也不能用测试集结果反复调参。

@@ -1,0 +1,9 @@
+{
+  "task_id": "TASK-20261030220327-56D167",
+  "status": "completed",
+  "answer": "批次 FIXTURE-BATCH-001 共 1 张，模型框 1 个，已复核 1 张；分类统计：{\"patches\": 1}。",
+  "references": [],
+  "source": "rule_fallback",
+  "review_version": null,
+  "stale": false
+}

@@ -1,13 +1,13 @@
 {
-  "inspection_id": "INSP-20261030173736-6DC741",
-  "task_id": "TASK-20261030173736-60D196",
+  "inspection_id": "INSP-20261030220326-1AD8DB",
+  "task_id": "TASK-20261030220326-3EDC62",
   "status": "completed",
-  "detection_count": 2,
+  "detection_count": 1,
   "image_width": 200,
   "image_height": 200,
-  "model_version": "best.pt",
+  "model_version": "fixture-not-yolo",
   "timing": {
-    "inference_ms": 41.7,
-    "total_ms": 5640.22
+    "inference_ms": 0,
+    "total_ms": 0.07
   }
 }

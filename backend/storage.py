@@ -9,8 +9,10 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 
 import config
+import review_snapshot
 
 STORAGE_DIR = os.environ.get('STEELSCAN_STORAGE_DIR', os.path.join(config.DEV, 'storage'))
 IMAGES_DIR = os.path.join(STORAGE_DIR, 'images')
@@ -81,6 +83,7 @@ CREATE TABLE IF NOT EXISTS reports (
     inspection_id TEXT,
     format TEXT,
     content TEXT,
+    review_version INTEGER,
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_inspections_batch ON inspections(batch_no);
@@ -96,32 +99,36 @@ def new_id(prefix):
     return '%s-%s-%s' % (prefix, time.strftime('%Y%m%d%H%M%S'), uuid.uuid4().hex[:6].upper())
 
 
+@contextmanager
 def get_conn():
     os.makedirs(IMAGES_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL')
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
     os.makedirs(IMAGES_DIR, exist_ok=True)
     with _lock, get_conn() as conn:
         conn.executescript(SCHEMA)
+        if 'review_version' not in {row['name'] for row in conn.execute('PRAGMA table_info(reports)')}:
+            conn.execute('ALTER TABLE reports ADD COLUMN review_version INTEGER')
 
 
-def insert_inspection(inspection_id, batch_no, workpiece_no, image_path, annotated_path,
-                      width, height, model_version, timing):
+def save_inspection(inspection_id, batch_no, workpiece_no, image_path, annotated_path,
+                    width, height, model_version, timing, defects, task_id):
+    """Commit the inspection, immutable predictions and completed task together."""
     with _lock, get_conn() as conn:
         conn.execute(
             'INSERT INTO inspections (inspection_id,batch_no,workpiece_no,image_path,annotated_path,'
             'width,height,model_version,timing_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
             (inspection_id, batch_no, workpiece_no, image_path, annotated_path, width, height,
              model_version, json.dumps(timing, ensure_ascii=False), now()))
-
-
-def insert_detections(inspection_id, defects):
-    with _lock, get_conn() as conn:
         for i, d in enumerate(defects):
             score = d.get('confidence', d.get('score', 0))
             conn.execute(
@@ -130,6 +137,13 @@ def insert_detections(inspection_id, defects):
                 (d.get('detection_id') or new_id('DET'), inspection_id, d['class_id'],
                  d['class_name'], score, json.dumps(d['bbox_xyxy']),
                  json.dumps(d, ensure_ascii=False), i))
+        ts = now()
+        result = {'inspection_id': inspection_id, 'detections': defects, 'timing': timing}
+        conn.execute(
+            'INSERT INTO tasks (task_id,type,status,inspection_id,created_at,updated_at,result_json)'
+            ' VALUES (?,?,?,?,?,?,?)',
+            (task_id, 'detection', 'completed', inspection_id, ts, ts,
+             json.dumps(result, ensure_ascii=False)))
 
 
 def insert_task(task_id, type_, status, inspection_id=None, result=None, error=None):
@@ -157,11 +171,23 @@ def get_task(task_id):
 
 def get_inspection(inspection_id):
     with get_conn() as conn:
+        conn.execute('BEGIN')
         row = conn.execute('SELECT * FROM inspections WHERE inspection_id=?', (inspection_id,)).fetchone()
         if not row:
             return None, []
         dets = [dict(r) for r in conn.execute(
             'SELECT * FROM detections WHERE inspection_id=? ORDER BY order_idx', (inspection_id,))]
+        row = dict(row)
+        review = conn.execute('SELECT * FROM reviews WHERE inspection_id=? ORDER BY id DESC LIMIT 1',
+                              (inspection_id,)).fetchone()
+        row['review'] = dict(review) if review else None
+        if review:
+            row['review']['payload'] = json.loads(review['payload_json'])
+        analysis = conn.execute('SELECT * FROM analyses WHERE inspection_id=? ORDER BY id DESC LIMIT 1',
+                                (inspection_id,)).fetchone()
+        row['analysis'] = json.loads(analysis['content_json']) if analysis else None
+        if analysis:
+            row['analysis']['created_at'] = analysis['created_at']
     return row, dets
 
 
@@ -182,23 +208,37 @@ def list_inspections(batch_no=None, class_id=None, review_status=None, page=1, p
         args.append(review_status)
     if wheres:
         sql += ' WHERE ' + ' AND '.join(wheres)
-    sql += ' ORDER BY i.created_at DESC LIMIT ? OFFSET ?'
-    args += [page_size, (page - 1) * page_size]
     with get_conn() as conn:
-        rows = [dict(r) for r in conn.execute(sql, args)]
-        total = conn.execute('SELECT COUNT(*) FROM inspections').fetchone()[0]
+        conn.execute('BEGIN')
+        total = conn.execute('SELECT COUNT(*) FROM (' + sql + ')', args).fetchone()[0]
+        rows = [dict(r) for r in conn.execute(
+            sql + ' ORDER BY i.created_at DESC, i.inspection_id DESC LIMIT ? OFFSET ?',
+            args + [page_size, (page - 1) * page_size])]
     return rows, total
 
 
 def add_review(inspection_id, review_status, reviewer, payload, base_version):
     with _lock, get_conn() as conn:
-        row = conn.execute('SELECT review_version FROM inspections WHERE inspection_id=?',
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT review_version,width,height FROM inspections WHERE inspection_id=?',
                            (inspection_id,)).fetchone()
         if not row:
             return None, 'not_found'
         current = row['review_version']
-        if base_version is not None and int(base_version) != int(current):
+        if base_version != current:
             return None, 'version_conflict'
+        corrections = payload.get('corrections')
+        if corrections is None:
+            previous = conn.execute('SELECT payload_json FROM reviews WHERE inspection_id=? '
+                                    'ORDER BY id DESC LIMIT 1', (inspection_id,)).fetchone()
+            corrections = (json.loads(previous['payload_json']).get('corrections') or []) if previous else []
+        detections = [{'detection_id': r['detection_id'], 'class_id': r['class_id'],
+                       'class_name': r['class_name'], 'score': r['score'],
+                       'bbox_xyxy': json.loads(r['bbox_json'])}
+                      for r in conn.execute('SELECT * FROM detections WHERE inspection_id=? ORDER BY order_idx',
+                                            (inspection_id,))]
+        corrections, _ = review_snapshot.apply_corrections(detections, corrections, row['width'], row['height'])
+        payload = dict(payload, corrections=corrections)
         conn.execute('INSERT INTO reviews (inspection_id,review_status,reviewer,payload_json,'
                      'base_version,created_at) VALUES (?,?,?,?,?,?)',
                      (inspection_id, review_status, reviewer,
@@ -208,21 +248,10 @@ def add_review(inspection_id, review_status, reviewer, payload, base_version):
     return current + 1, None
 
 
-def get_latest_review(inspection_id):
-    with get_conn() as conn:
-        row = conn.execute('SELECT * FROM reviews WHERE inspection_id=? ORDER BY id DESC LIMIT 1',
-                           (inspection_id,)).fetchone()
-    if not row:
-        return None
-    d = dict(row)
-    d['payload'] = json.loads(d['payload_json']) if d.get('payload_json') else None
-    return d
-
-
 def add_analysis(inspection_id, content):
     with _lock, get_conn() as conn:
         conn.execute('INSERT INTO analyses (inspection_id,content_json,created_at) VALUES (?,?,?)',
-                     (inspection_id, json.dumps(content, ensure_ascii=False), now()))
+                     (inspection_id, json.dumps(content, ensure_ascii=False), content['created_at']))
 
 
 def add_chat(context_type, context_id, question, answer):
@@ -231,10 +260,10 @@ def add_chat(context_type, context_id, question, answer):
                      (context_type, context_id, question, answer, now()))
 
 
-def save_report(report_id, inspection_id, fmt, content):
+def save_report(report_id, inspection_id, fmt, content, review_version):
     with _lock, get_conn() as conn:
-        conn.execute('INSERT OR REPLACE INTO reports (id,inspection_id,format,content,created_at) VALUES (?,?,?,?,?)',
-                     (report_id, inspection_id, fmt, content, now()))
+        conn.execute('INSERT INTO reports (id,inspection_id,format,content,review_version,created_at) VALUES (?,?,?,?,?,?)',
+                     (report_id, inspection_id, fmt, content, review_version, now()))
 
 
 def get_report(report_id):

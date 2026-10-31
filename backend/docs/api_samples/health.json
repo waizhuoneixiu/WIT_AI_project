@@ -1,22 +1,19 @@
 {
   "status": "ok",
   "service": "steelscan-defect-api",
-  "api_version": "1.2.0",
-  "version": "1.2.0",
+  "api_version": "1.3.0",
+  "version": "1.3.0",
   "model_loaded": false,
   "auth_required": false,
-  "storage": "C:\\Users\\何ch\\AppData\\Local\\Temp\\steelscan_samples_y9353baz\\samples.db",
+  "detector_provider": "test-fixture",
+  "detector_configured": true,
+  "model_version": "fixture-not-yolo",
   "llm": {
-    "provider": "deepseek",
-    "mode": "deepseek-api",
+    "provider": "none",
+    "mode": "rule-fallback",
     "model": "deepseek-chat",
-    "configured": true,
-    "source": "deepseek",
-    "deepseek_configured": true,
-    "local_model_path": "D:\\Users\\何ch\\source\\repos  AI\\AIvision1\\models\\DeepSeek-R1-Distill-Qwen-1.5B",
-    "local_model_ready": true,
-    "base_url": "https://api.deepseek.com",
-    "timeout_s": 40.0
+    "configured": false,
+    "source": "rule_fallback"
   },
   "contract_classes": [
     {
