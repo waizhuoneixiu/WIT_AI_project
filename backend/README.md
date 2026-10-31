@@ -92,3 +92,13 @@ Copy-Item .env.example .env   # 仅首次；已有 .env 时不要覆盖
 不实现批量 App、视频、完整 WebSocket 流、离线待上传队列或多端交付。保留已有显式 local 代码，但本轮不验证本地模型运行。
 
 数据与权重来源见 [模型卡](docs/模型卡_n640.md)、[训练实验记录](docs/训练实验记录.md)。YOLO 实现采用 Ultralytics，需分别遵守代码、模型与数据的适用许可；FastAPI、Compose 等第三方来源见总计划。
+
+## 2026-10-31 模型升级（跨厂泛化版）
+
+- 生产模型：Severstal 跨厂预训练 + NEU train+val 重划分微调
+- NEU test 270 张：mAP50 **0.8223**（基线 0.8057）、mAP50-95 0.4722、P 0.8016、R 0.7453、图片级漏检率 **1.85%**（基线 2.59%）
+- 权重：`models/best.pt` / `models/best.onnx`；基线备份（本地）：`models/best_baseline_n640.pt`
+- 魔搭演示已更新并验证：https://modelscope.cn/studios/waizhuoneixiu/steelscan-demo
+- 详细数据来源、训练方法、失败实验与准确率：[docs/数据增长与泛化训练说明.docx](docs/数据增长与泛化训练说明.docx) / [PDF](docs/数据增长与泛化训练说明.pdf)
+- 训练脚本：`scripts/prepare_severstal_aux.py`、`scripts/train_severstal_aux.py`、`scripts/finetune_neu.py`、`scripts/prepare_neu_plus.py`
+- 重要限制：Severstal 只有 4 类，不能当作六类跨厂测试集；跨厂六类泛化仍需 X-SDD 或真实产线六类标注数据。
