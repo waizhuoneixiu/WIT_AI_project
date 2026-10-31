@@ -7,7 +7,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 
 enum class MainPage { Detect, History, Settings }
 enum class DetailTab { Result, Review, Assistant, Report }
@@ -57,6 +60,14 @@ class AppState : ViewModel() {
     var conversation by mutableStateOf<List<ConversationTurn>>(emptyList()); private set
     var report by mutableStateOf<Report?>(null); private set
     var history by mutableStateOf<InspectionPage?>(null); private set
+    var historyLoading by mutableStateOf(false); private set
+    var historyError by mutableStateOf<String?>(null); private set
+    var historyAttempted by mutableStateOf(false); private set
+    var recordLoading by mutableStateOf(false); private set
+    private var historyJob: Job? = null
+    private var recordJob: Job? = null
+    private var historyGeneration = 0
+    private var recordGeneration = 0
     var filterBatch by mutableStateOf("")
     var filterClass by mutableStateOf<Int?>(null)
     var filterStatus by mutableStateOf<String?>(null)
@@ -82,6 +93,18 @@ class AppState : ViewModel() {
     }
 
     fun reconnect(client: HttpClient, settings: ConnectionSettings) {
+        if (settings == connection) {
+            api = SteelApi(client, settings)
+            notice = "连接设置已保存"
+            return
+        }
+        historyGeneration++
+        historyJob?.cancel()
+        cancelRecordRead()
+        historyLoading = false
+        historyError = null
+        historyAttempted = false
+        historyPage = 1
         api = SteelApi(client, settings)
         connection = settings
         inspection = null
@@ -158,6 +181,7 @@ class AppState : ViewModel() {
 
     private suspend fun SteelApi.openInspection(id: String) {
         val item = inspection(id)
+        coroutineContext.ensureActive()
         if (item.inspectionId != id) throw ApiException(-1, "服务返回了不同的检测记录，请检查服务。")
         if (id == createdRecordId) { uncertainUpload = false; picked = null }
         this@AppState.inspection = item
@@ -175,11 +199,36 @@ class AppState : ViewModel() {
         }
     }
 
-    fun openRecord(id: String) = task("正在读取记录") { openInspection(id) }
+    fun openRecord(id: String) {
+        if (busy != null || recordLoading) return
+        val client = api ?: return
+        val generation = recordGeneration
+        recordLoading = true
+        error = null
+        recordJob = viewModelScope.launch {
+            try { client.openInspection(id) }
+            catch (cancel: CancellationException) { throw cancel }
+            catch (e: ApiException) { error = e.publicMessage }
+            catch (_: Exception) { error = "记录读取失败，请检查连接后重试。" }
+            finally { if (generation == recordGeneration) recordLoading = false }
+        }
+    }
+
+    private fun cancelRecordRead() {
+        recordGeneration++
+        recordJob?.cancel()
+        recordJob = null
+        recordLoading = false
+    }
+
+    fun showPage(next: MainPage) {
+        closeRecord()
+        page = next
+    }
 
     fun refreshRecord() {
         val id = inspection?.inspectionId ?: return
-        task("正在刷新记录") { openInspection(id) }
+        openRecord(id)
     }
 
     private fun initialReviewStatus(item: Inspection): String =
@@ -285,20 +334,54 @@ class AppState : ViewModel() {
         task("正在生成当前版本报告") { report = report(item.inspectionId) }
     }
 
-    fun loadHistory(page: Int = 1) = task("正在读取历史记录") {
-        history = inspections(filterBatch.trim(), filterClass, filterStatus, page)
-        historyPage = page
-        summary = null
+    fun ensureHistoryLoaded() {
+        if (!historyAttempted) loadHistory()
+    }
+
+    private fun historyTask(block: suspend SteelApi.() -> Unit) {
+        if (historyLoading || busy != null) return
+        val client = api ?: return
+        val generation = historyGeneration
+        historyLoading = true
+        historyError = null
+        historyJob = viewModelScope.launch {
+            try { block(client) }
+            catch (cancel: CancellationException) { throw cancel }
+            catch (e: ApiException) { if (generation == historyGeneration) historyError = e.publicMessage }
+            catch (_: Exception) {
+                if (generation == historyGeneration) historyError = "读取失败，请检查连接后点击重新读取。"
+            }
+            finally { if (generation == historyGeneration) historyLoading = false }
+        }
+    }
+
+    fun loadHistory(page: Int = 1) {
+        if (api == null || historyLoading || busy != null) return
+        val batch = filterBatch.trim()
+        val category = filterClass
+        val status = filterStatus
+        historyAttempted = true
+        historyTask {
+            val result = inspections(batch, category, status, page)
+            coroutineContext.ensureActive()
+            history = result
+            historyPage = page
+            summary = null
+        }
     }
 
     fun loadBatchSummary() {
         if (filterBatch.isBlank()) { error = "先输入一个批次号"; return }
-        task("正在读取批次统计") { summary = batchSummary(filterBatch.trim()) }
+        val batch = filterBatch.trim()
+        historyTask {
+            val result = batchSummary(batch)
+            coroutineContext.ensureActive()
+            summary = result
+        }
     }
 
     fun findUncertainUpload() {
-        page = MainPage.History
-        inspection = null
+        showPage(MainPage.History)
         filterBatch = batchNo.trim()
         loadHistory()
     }
@@ -306,6 +389,7 @@ class AppState : ViewModel() {
     fun allowExplicitRetry() { uncertainUpload = false; page = MainPage.Detect }
 
     fun closeRecord() {
+        cancelRecordRead()
         inspection = null
         originalBytes = null
         conversation = emptyList()

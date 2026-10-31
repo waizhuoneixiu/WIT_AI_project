@@ -13,18 +13,42 @@ import androidx.compose.ui.unit.dp
 fun HistoryScreen(state: AppState, busy: Boolean, onExplicitRetry: () -> Unit) {
     ScreenColumn {
         SectionTitle("每一次，都有记录。", "按批次查看检测证据与人工判断。")
+        PaperCard(SkyTint) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (state.historyLoading) "正在读取记录…" else "记录留在这里", style = MaterialTheme.typography.titleMedium)
+                    Text("首次进入自动读取，返回时保留列表。", color = Graphite, style = MaterialTheme.typography.bodySmall)
+                }
+                OutlinedButton({ state.loadHistory() }, enabled = !busy && !state.historyLoading) {
+                    Text("重新读取")
+                }
+            }
+            if (state.historyLoading) {
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalBlue, trackColor = PowderBlue)
+                Spacer(Modifier.height(8.dp))
+                Text("可随时切换检测或设置，读取会在后台继续。", color = Graphite, style = MaterialTheme.typography.bodySmall)
+            }
+            state.historyError?.let { message ->
+                Spacer(Modifier.height(10.dp))
+                Text("读取未完成：$message", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                if (state.history != null) Text("上次读取的记录仍保留。", color = Graphite, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val canQuery = !busy && !state.historyLoading
         PaperCard(Lavender) {
             OutlinedTextField(state.filterBatch, { state.filterBatch = it }, label = { Text("批次号") },
-                placeholder = { Text("留空查看全部批次") }, modifier = Modifier.fillMaxWidth(), enabled = !busy, singleLine = true)
-            ChoiceField("模型类别", state.filterClass?.let(::className) ?: "全部", listOf(null to "全部") + classNames.mapIndexed { i, label -> i to label }, !busy) {
+                placeholder = { Text("留空查看全部批次") }, modifier = Modifier.fillMaxWidth(), enabled = canQuery, singleLine = true)
+            ChoiceField("模型类别", state.filterClass?.let(::className) ?: "全部", listOf(null to "全部") + classNames.mapIndexed { i, label -> i to label }, canQuery) {
                 state.filterClass = it
             }
-            ChoiceField("复核状态", state.filterStatus?.let(::reviewLabel) ?: "全部", listOf(null to "全部", "pending" to "待复核", "confirmed" to "已确认", "corrected" to "已修正", "unresolved" to "无法判断"), !busy) {
+            ChoiceField("复核状态", state.filterStatus?.let(::reviewLabel) ?: "全部", listOf(null to "全部", "pending" to "待复核", "confirmed" to "已确认", "corrected" to "已修正", "unresolved" to "无法判断"), canQuery) {
                 state.filterStatus = it
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryAction("查询记录", { state.loadHistory() }, !busy, Modifier.weight(1f))
-                OutlinedButton(state::loadBatchSummary, enabled = !busy && state.filterBatch.isNotBlank(),
+                PrimaryAction("应用筛选", { state.loadHistory() }, canQuery, Modifier.weight(1f))
+                OutlinedButton(state::loadBatchSummary, enabled = canQuery && state.filterBatch.isNotBlank(),
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 14.dp)) { Text("批次汇总") }
             }
             Spacer(Modifier.height(8.dp))
@@ -57,7 +81,7 @@ fun HistoryScreen(state: AppState, busy: Boolean, onExplicitRetry: () -> Unit) {
         }
         val history = state.history
         if (history == null) {
-            Text("点击查询，读取服务端记录。", color = Graphite)
+            if (!state.historyLoading && state.historyError == null) Text("点击重新读取，获取服务端记录。", color = Graphite)
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("检测记录", style = MaterialTheme.typography.titleLarge)
@@ -86,9 +110,9 @@ fun HistoryScreen(state: AppState, busy: Boolean, onExplicitRetry: () -> Unit) {
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ state.loadHistory(state.historyPage - 1) }, enabled = !busy && state.historyPage > 1) { Text("上一页") }
+                TextButton({ state.loadHistory(state.historyPage - 1) }, enabled = canQuery && state.historyPage > 1) { Text("上一页") }
                 Text("第 ${state.historyPage} 页", color = Graphite)
-                TextButton({ state.loadHistory(state.historyPage + 1) }, enabled = !busy && state.historyPage * history.pageSize < history.total) { Text("下一页") }
+                TextButton({ state.loadHistory(state.historyPage + 1) }, enabled = canQuery && state.historyPage * history.pageSize < history.total) { Text("下一页") }
             }
         }
     }

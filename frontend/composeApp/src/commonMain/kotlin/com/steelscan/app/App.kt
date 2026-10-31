@@ -4,6 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -23,7 +26,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
@@ -38,6 +40,8 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
     var retryConfirmation by remember { mutableStateOf(false) }
     var savedRecordId by rememberSaveable { mutableStateOf<String?>(null) }
     var savedPage by rememberSaveable { mutableStateOf(MainPage.Detect.name) }
+    val pager = rememberPagerState(initialPage = state.page.ordinal) { MainPage.entries.size }
+    var animatingPage by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val restoring = !state.initialized
         try { state.bind(httpClient, platform.loadConnection()) }
@@ -54,9 +58,32 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
         state.inspection?.inspectionId?.let { savedRecordId = it }
     }
     LaunchedEffect(state.page) { savedPage = state.page.name }
-    val busy = state.busy != null || platformBusy
+    LaunchedEffect(state.page) {
+        if (pager.settledPage != state.page.ordinal || pager.currentPageOffsetFraction != 0f) {
+            animatingPage = true
+            try { pager.animateScrollToPage(state.page.ordinal, animationSpec = tween(280)) }
+            finally { animatingPage = false }
+        }
+    }
+    LaunchedEffect(pager) {
+        snapshotFlow { Triple(pager.settledPage, pager.isScrollInProgress, animatingPage) }.collect { (index, scrolling, animating) ->
+            if (scrolling && state.recordLoading && state.inspection == null) {
+                state.closeRecord()
+                savedRecordId = null
+            }
+            if (!scrolling && !animating && state.page.ordinal != index) {
+                state.showPage(MainPage.entries[index])
+                savedRecordId = null
+            }
+        }
+    }
+    LaunchedEffect(state.page, state.initialized) {
+        if (state.initialized && state.page == MainPage.History) state.ensureHistoryLoaded()
+    }
+    val navigationBusy = state.busy != null || platformBusy
+    val busy = navigationBusy || state.recordLoading
     fun navigate(action: () -> Unit) {
-        if (busy) return
+        if (navigationBusy) return
         if (state.inspection != null && state.dirty) pendingDiscard = action else action()
     }
     fun platformAction(action: suspend () -> Unit) {
@@ -78,23 +105,9 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
             containerColor = CanvasColor,
             topBar = {
                 Column(Modifier.statusBarsPadding().background(CanvasColor)) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        BrandMark()
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("钢见", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-                            Text("STEELSCAN", color = Graphite, fontSize = 10.sp, letterSpacing = 2.sp)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Surface(shape = RoundedCornerShape(99.dp), color = SkyTint) {
-                            Text("质检工作台", Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                color = Ink, style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
                     if (busy) {
                         LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalBlue, trackColor = SkyTint)
-                        Text(state.busy ?: "正在处理图片", Modifier.padding(horizontal = 24.dp, vertical = 5.dp),
+                        Text(state.busy ?: if (state.recordLoading) "正在读取记录" else "正在处理图片", Modifier.padding(horizontal = 24.dp, vertical = 5.dp),
                             color = Graphite, style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -102,9 +115,8 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
             bottomBar = {
                 NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
                     listOf(MainPage.Detect to "检测", MainPage.History to "记录", MainPage.Settings to "设置").forEach { (page, label) ->
-                        NavigationBarItem(selected = state.page == page, enabled = !busy,
-                            onClick = { navigate { state.closeRecord(); savedRecordId = null; state.page = page
-                                if (page == MainPage.History) state.loadHistory() } },
+                        NavigationBarItem(selected = state.page == page, enabled = !navigationBusy,
+                            onClick = { navigate { state.showPage(page); savedRecordId = null } },
                             icon = { NavGlyph(page, state.page == page) }, label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(indicatorColor = SkyTint, selectedIconColor = Ink, selectedTextColor = Ink))
                     }
@@ -126,7 +138,12 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
                             onRefresh = { navigate { state.refreshRecord() } },
                             onPlatformAction = { action -> platformAction(action) })
                     }
-                } else when (state.page) {
+                } else HorizontalPager(
+                    state = pager,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = !navigationBusy,
+                    key = { MainPage.entries[it].name },
+                ) { index -> when (MainPage.entries[index]) {
                     MainPage.Detect -> DetectScreen(state, platform, busy,
                         onPick = { camera -> platformAction {
                             val picked = if (camera) platform.takePhoto() else platform.pickImage()
@@ -144,7 +161,7 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
                             state.checkConnection()
                         }
                     }
-                }
+                } }
             }
         }
         pendingDiscard?.let { action ->
@@ -159,19 +176,6 @@ fun App(platform: PlatformBridge, httpClient: HttpClient) {
                 confirmButton = { TextButton(onClick = { retryConfirmation = false; state.allowExplicitRetry() }) { Text("已检查，允许重新提交") } },
                 dismissButton = { TextButton(onClick = { retryConfirmation = false; state.findUncertainUpload() }) { Text("查看历史") } })
         }
-    }
-}
-
-@Composable
-private fun BrandMark() {
-    Canvas(Modifier.size(34.dp)) {
-        drawRoundRect(Ink, cornerRadius = androidx.compose.ui.geometry.CornerRadius(9.dp.toPx()))
-        val line = 2.dp.toPx()
-        drawLine(Color.White, Offset(size.width * .28f, size.height * .3f), Offset(size.width * .28f, size.height * .7f), line)
-        drawLine(Color.White, Offset(size.width * .28f, size.height * .3f), Offset(size.width * .58f, size.height * .3f), line)
-        drawLine(Color.White, Offset(size.width * .72f, size.height * .7f), Offset(size.width * .42f, size.height * .7f), line)
-        drawLine(Color.White, Offset(size.width * .72f, size.height * .3f), Offset(size.width * .72f, size.height * .7f), line)
-        drawCircle(PowderBlue, 2.dp.toPx(), Offset(size.width / 2, size.height / 2))
     }
 }
 
@@ -241,10 +245,6 @@ private fun DetectScreen(state: AppState, platform: PlatformBridge, busy: Boolea
     val bitmap = DecodedImage(state.picked?.bytes, platform)
     ScreenColumn {
         Spacer(Modifier.height(2.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("每一次复核，都有据可循。", color = Graphite, style = MaterialTheme.typography.bodyMedium)
-            Text("看见细节，\n留住判断。", style = MaterialTheme.typography.headlineLarge)
-        }
         PaperCard(Mint) {
             Text("01  /  添加待检图片", style = MaterialTheme.typography.labelMedium)
             Spacer(Modifier.height(18.dp))
