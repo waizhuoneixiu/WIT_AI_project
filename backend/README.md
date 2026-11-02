@@ -102,3 +102,11 @@ Copy-Item .env.example .env   # 仅首次；已有 .env 时不要覆盖
 - 详细数据来源、训练方法、失败实验与准确率：[docs/数据增长与泛化训练说明.docx](docs/数据增长与泛化训练说明.docx) / [PDF](docs/数据增长与泛化训练说明.pdf)
 - 训练脚本：`scripts/prepare_severstal_aux.py`、`scripts/train_severstal_aux.py`、`scripts/finetune_neu.py`、`scripts/prepare_neu_plus.py`
 - 重要限制：Severstal 只有 4 类，不能当作六类跨厂测试集；跨厂六类泛化仍需 X-SDD 或真实产线六类标注数据。
+
+## 2026-11-03 数据扩充实验（GC10-DET，未采用）
+
+- 新增公开数据 GC10-DET：2312 张、2294 XML、清洗后 10 类、3563 框；1837 train / 455 val。
+- 流程：GC10 10 类预训练 40 轮 → NEU 六类 1380/150 微调 120 轮。
+- 候选 NEU test：mAP50 **0.8023**、mAP50-95 0.4594、P 0.7225、R 0.7795；低于当前线上 0.8223。
+- 结论：类别体系不一致，辅助数据未带来提升；**不替换模型**，线上仍为跨厂泛化版 0.8223。
+- 文档：[docs/数据扩充与精度实验说明.docx](docs/数据扩充与精度实验说明.docx)；PPT 素材：[docs/PPT_material.md](docs/PPT_material.md)。
