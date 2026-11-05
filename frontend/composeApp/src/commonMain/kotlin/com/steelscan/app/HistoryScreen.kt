@@ -12,7 +12,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun HistoryScreen(state: AppState, busy: Boolean, onExplicitRetry: () -> Unit) {
     ScreenColumn {
-        SectionTitle("每一次，都有记录。", "按批次查看检测证据与人工判断。")
         PaperCard(SkyTint) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -35,6 +34,8 @@ fun HistoryScreen(state: AppState, busy: Boolean, onExplicitRetry: () -> Unit) {
                 Text("读取未完成：$message", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 if (state.history != null) Text("上次读取的记录仍保留。", color = Graphite, style = MaterialTheme.typography.bodySmall)
             }
+            Spacer(Modifier.height(12.dp))
+            Text("按批次查看检测证据与人工判断。", color = Graphite, style = MaterialTheme.typography.bodySmall)
         }
         val canQuery = !busy && !state.historyLoading
         PaperCard(Lavender) {

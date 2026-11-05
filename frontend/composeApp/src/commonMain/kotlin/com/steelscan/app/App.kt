@@ -307,7 +307,6 @@ private fun DetectScreen(state: AppState, platform: PlatformBridge, busy: Boolea
 @Composable
 private fun SettingsScreen(state: AppState, busy: Boolean, onSave: () -> Unit) {
     ScreenColumn {
-        SectionTitle("连接与设置", "连接你的质检服务，保持数据在同一个工作台。")
         PaperCard(Lavender) {
             Text("业务服务", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(14.dp))
@@ -321,6 +320,8 @@ private fun SettingsScreen(state: AppState, busy: Boolean, onSave: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             PrimaryAction("保存并检查连接", onSave, !busy, Modifier.fillMaxWidth())
             TextButton(state::checkConnection, enabled = !busy) { Text("检查已保存的连接") }
+            Spacer(Modifier.height(8.dp))
+            Text("连接你的质检服务，保持数据在同一个工作台。", color = Graphite, style = MaterialTheme.typography.bodySmall)
         }
         PaperCard {
             Text("服务状态", style = MaterialTheme.typography.titleLarge)
